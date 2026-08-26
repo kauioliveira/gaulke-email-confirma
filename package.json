@@ -1,0 +1,43 @@
+{
+  "name": "gaulke-email-confirma",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev --host",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "db:studio": "drizzle-kit studio",
+    "db:migrate": "node --env-file=.env scripts/migrate.mjs",
+    "db:migrate:prod": "node --env-file=.env.production scripts/migrate.mjs",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@nuxt/ui": "^4.0.0",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.36.4",
+    "nodemailer": "^6.9.16",
+    "nuxt": "^4.0.0",
+    "papaparse": "^5.4.1",
+    "postgres": "^3.4.5",
+    "tailwindcss": "^4.3.3",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.17",
+    "@types/papaparse": "^5.3.15",
+    "drizzle-kit": "^0.28.1",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.11"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true,
+    "esbuild@0.19.12": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.18.20": true,
+    "vue-demi@0.14.10": true
+  }
+}

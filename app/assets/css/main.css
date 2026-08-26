@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* Paleta da marca Gaulke, derivada do azul #343881 da logo. */
+@theme static {
+  --color-gaulke-50: #eef0f9;
+  --color-gaulke-100: #dcdff3;
+  --color-gaulke-200: #bcc1e7;
+  --color-gaulke-300: #949bd6;
+  --color-gaulke-400: #6d75c1;
+  --color-gaulke-500: #4f56a5;
+  --color-gaulke-600: #343881;
+  --color-gaulke-700: #2c3069;
+  --color-gaulke-800: #242754;
+  --color-gaulke-900: #1d1f44;
+  --color-gaulke-950: #12132b;
+}

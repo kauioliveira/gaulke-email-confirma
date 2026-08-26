@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{empresa}}</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <!-- pre-header: texto de previa na caixa de entrada -->
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+      Documento disponivel para acesso — codigo {{codigo}}
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f1f5f9;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+
+            <!-- Cabecalho com a logo (servida por URL_ACESSO, precisa ser publica) -->
+            <tr>
+              <td align="center" style="background-color:#ffffff;border-bottom:3px solid #343881;padding:24px;">
+                <img src="{{logo}}" alt="Gaulke Contábil" width="180" style="display:block;border:0;max-width:180px;height:auto;" />
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:32px 32px 8px 32px;">
+                <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;">Ola, <strong>{{nome}}</strong>,</p>
+                <p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#334155;">
+                  Disponibilizamos um documento importante para a sua analise. O acesso e
+                  individual e esta vinculado a este e-mail.
+                </p>
+                <p style="margin:0 0 24px 0;font-size:15px;line-height:1.7;color:#334155;">
+                  Clique no botao abaixo para visualizar, confirmar a leitura e baixar o arquivo.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Botao principal -->
+            <tr>
+              <td align="center" style="padding:8px 32px 24px 32px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td align="center" bgcolor="#343881" style="border-radius:8px;">
+                      <a href="{{link}}" target="_blank"
+                         style="display:inline-block;padding:14px 32px;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">
+                        Acessar documento
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Codigo de referencia -->
+            <tr>
+              <td style="padding:0 32px 24px 32px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+                  <tr>
+                    <td style="padding:16px;text-align:center;">
+                      <p style="margin:0 0 4px 0;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;">Codigo de referencia</p>
+                      <p style="margin:0;font-size:20px;font-weight:bold;letter-spacing:2px;color:#0f172a;font-family:'Courier New',monospace;">{{codigo}}</p>
+                      <p style="margin:8px 0 0 0;font-size:12px;color:#64748b;">Informe este codigo caso precise falar com a nossa equipe.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 32px 24px 32px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
+                  Se o botao nao funcionar, copie e cole este endereco no navegador:<br />
+                  <a href="{{link}}" style="color:#343881;word-break:break-all;">{{link}}</a>
+                </p>
+              </td>
+            </tr>
+
+            <!-- Rodape: transparencia LGPD -->
+            <tr>
+              <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 32px;">
+                <p style="margin:0 0 8px 0;font-size:12px;line-height:1.6;color:#64748b;">
+                  Este e-mail foi enviado para <strong>{{email}}</strong> e o link de acesso e de uso pessoal.
+                </p>
+                <p style="margin:0 0 8px 0;font-size:11px;line-height:1.6;color:#94a3b8;">
+                  Para fins de comprovacao de entrega e ciencia, registramos a data, a hora e o
+                  endereco IP do acesso a pagina, da confirmacao de leitura e do download do arquivo.
+                  O tratamento desses dados segue a Lei 13.709/2018 (LGPD), limita-se a essa
+                  finalidade e os registros sao mantidos por 24 meses.
+                </p>
+                <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8;">
+                  Gaulke Contábil — em caso de duvida, responda a este e-mail.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    <img src="{{pixel}}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px;" />
+  </body>
+</html>

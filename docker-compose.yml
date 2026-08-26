@@ -1,0 +1,43 @@
+# Este compose roda NO SERVIDOR, ao lado do .tar carregado pelo exec.sh.
+# Por isso NAO tem `build:`: la nao existe codigo-fonte, so a imagem que o
+# build-image-production.sh gerou e enviou.
+services:
+  app:
+    image: gaulke-email-confirma:latest
+    container_name: gaulke-email-confirma
+    restart: unless-stopped
+
+    # A porta do host vem do .env.production e depende do --env-file no
+    # comando do compose: o `env_file:` abaixo alimenta o AMBIENTE DO
+    # CONTEINER, nao a interpolacao de ${...} aqui. Sem a flag, o valor
+    # viria vazio e cairia no padrao — abrindo uma porta diferente da que
+    # o proxy reverso consulta.
+    #
+    # So no loopback: quem fala com a internet e o Nginx/Apache.
+    ports:
+      - '127.0.0.1:${APP_HOST_PORT:-8551}:3000'
+
+    env_file:
+      - .env.production
+
+    volumes:
+      # PDFs dos lotes. Sem volume eles somem a cada deploy, e os links
+      # ja enviados aos clientes passam a devolver "arquivo indisponivel".
+      - arquivos:/app/storage/files
+
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/admin/sessao']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+
+volumes:
+  arquivos:
+    name: gaulke-email-confirma-arquivos

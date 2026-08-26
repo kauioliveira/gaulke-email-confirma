@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "nuxt": {
+      "type": "http",
+      "url": "https://nuxt.com/mcp"
+    },
+    "nuxt-ui": {
+      "type": "http",
+      "url": "https://ui.nuxt.com/mcp"
+    },
+    "supabaseProd": {
+      "type": "http",
+      "url": "http://192.168.0.204:8001/mcp?features=docs%2Cdatabase%2Cdebugging%2Cdevelopment"
+    },
+    "supabaseDesenvolvimento": {
+      "type": "http",
+      "url": "http://192.168.0.10:8001/mcp?features=docs%2Cdatabase%2Cdebugging%2Cdevelopment"
+    },
+    "postgresDesenvolvimento": {
+      "type": "stdio",
+      "command": "sh",
+      "args": [
+        "-c",
+        "set -a; . ./.env; set +a; exec npx -y @henkey/postgres-mcp-server --connection-string \"$DATABASE_URL\""
+      ]
+    },
+    "postgresProducao": {
+      "type": "stdio",
+      "command": "sh",
+      "args": [
+        "-c",
+        "set -a; . ./.env.production; set +a; exec npx -y @henkey/postgres-mcp-server --connection-string \"$DATABASE_URL\""
+      ]
+    }
+  }
+}
