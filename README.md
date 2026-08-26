@@ -55,12 +55,26 @@ resposta, não entra no relatório. Use só quando o atrito valer a pena.
 `sys_mail_events` é append-only — nunca editamos um evento gravado. As colunas
 `*_at` em `sys_mail_recipients` são só desnormalização para o relatório ser rápido.
 
+## De onde vem a lista de destinatários
+
+O passo 1 do assistente aceita três origens, que passam pela **mesma** validação
+(e-mail válido, duplicados removidos, com relatório do que foi descartado):
+
+| Origem | Quando usar |
+|---|---|
+| **Importar arquivo** | CSV ou XLSX. A tela mostra o formato esperado e oferece um modelo para download (`/api/admin/modelo-lista`). Só a coluna de **e-mail** é obrigatória; o mapeamento das colunas é sugerido automaticamente e pode ser corrigido. |
+| **Do banco** | Reaproveita quem já recebeu algum envio. Cada pessoa aparece uma vez, com nome e empresa do envio mais recente. Filtra por lote de origem e por comportamento — "não confirmaram a leitura" é o caso mais comum de retrabalho. |
+| **Digitar** | Colar ou digitar, um por linha. Aceita `email@x.com`, `Nome <email@x.com>`, `Nome; email@x.com; Empresa` e a mesma variação com vírgula. Linhas com `#` são ignoradas. |
+
+A seleção feita em "Do banco" guarda o contato inteiro, não só o que está
+visível: trocar o filtro no meio da escolha não derruba ninguém da lista.
+
 ## Telas
 
 | Rota | O que faz |
 |---|---|
 | `/admin/lotes` | lista de lotes com progresso |
-| `/admin/lotes/novo` | assistente: importar CSV/XLSX → PDF → e-mail → revisão |
+| `/admin/lotes/novo` | assistente: lista → PDF → e-mail → revisão |
 | `/admin/lotes/:id` | console de disparo **em tempo real** (SSE), pausar/retomar/reenviar falhas |
 | `/admin/templates` | editor de HTML com preview visual e envio de teste |
 | `/admin/relatorio` | tabela filtrável + exportação CSV |
@@ -204,17 +218,37 @@ Todas as tabelas usam o prefixo `sys_mail_`: `sys_mail_templates`,
 > e gera `DROP` das tabelas dos outros sistemas da empresa — o `tablesFilter`
 > não impediu isso na prática. Por isso o comando foi removido do `package.json`.
 
-Para alterar o schema: escreva um `.sql` novo em `server/db/migrations/`
-(só instruções sobre `sys_mail_*`) e rode:
+### As migrations rodam sozinhas no boot
+
+Em **qualquer ambiente**, sem variável e sem passo manual: subiu a aplicação,
+o schema está pronto ([`server/utils/migrations.ts`](server/utils/migrations.ts),
+chamado por [`server/plugins/retomar-lotes.ts`](server/plugins/retomar-lotes.ts)).
+
+Isso só é seguro porque:
+
+- os arquivos são idempotentes (`CREATE ... IF NOT EXISTS`);
+- o que já rodou fica registrado em `sys_mail_migrations`;
+- qualquer `DROP`/`TRUNCATE` é **recusado** — este banco é compartilhado;
+- um `pg_advisory_xact_lock` serializa instâncias subindo ao mesmo tempo, então
+  duas réplicas nunca aplicam o mesmo arquivo em paralelo.
+
+Se falhar, a aplicação **sobe mesmo assim** — um contêiner em crash-loop
+esconderia o log que explica o problema. O erro aparece no log e em
+`/api/admin/status`.
+
+Para alterar o schema, escreva um `.sql` novo em `server/db/migrations/`
+(só instruções sobre `sys_mail_*`). Ele será aplicado no próximo boot.
+
+Para aplicar **sem** subir a aplicação:
 
 ```bash
 npm run db:migrate         # desenvolvimento (.env)
 npm run db:migrate:prod    # produção (.env.production)
+bash exec.sh migrate       # no servidor, contêiner descartável
 ```
 
-O `scripts/migrate.mjs` aplica os arquivos em ordem, registra o que já foi
-aplicado em `sys_mail_migrations` e **recusa** qualquer migration que contenha
-`DROP`/`TRUNCATE`.
+> O `scripts/migrate.mjs` roda fora do Nitro (não consegue importar o TS do
+> servidor), então repete a mesma lógica. Se mudar as regras em um, mude no outro.
 
 ## Comandos
 

@@ -109,3 +109,72 @@ export function normalizarLista(
 
   return { validos, rejeitados }
 }
+
+/**
+ * Modelo de planilha mostrado na tela e oferecido para download.
+ *
+ * Fonte unica: a tela de importacao e o arquivo de exemplo saem daqui, entao
+ * o que o operador ve documentado e o que o importador realmente aceita.
+ */
+export const COLUNAS_MODELO = ['Nome', 'E-mail', 'Empresa'] as const
+
+export function linhasModelo(): string[][] {
+  return [
+    ['Maria Oliveira', 'maria.oliveira@empresa.com.br', 'Empresa Exemplo LTDA'],
+    ['Joao Souza', 'joao.souza@outraempresa.com.br', 'Outra Empresa ME'],
+    ['', 'contato@terceiraempresa.com.br', 'Terceira Empresa SA']
+  ]
+}
+
+/**
+ * Le uma lista digitada a mao. Aceita os formatos que a pessoa naturalmente
+ * digita ou cola de outro lugar:
+ *
+ *   maria@empresa.com.br
+ *   Maria Oliveira <maria@empresa.com.br>
+ *   Maria Oliveira; maria@empresa.com.br; Empresa Exemplo
+ *   Maria Oliveira, maria@empresa.com.br, Empresa Exemplo
+ *
+ * A validacao e a deduplicacao continuam sendo feitas depois, pelo mesmo
+ * caminho da planilha — aqui so extraimos os campos.
+ */
+export function lerListaDigitada(texto: string): LinhaImportada[] {
+  const saida: LinhaImportada[] = []
+
+  for (const linha of texto.split(/[\r\n]+/)) {
+    const bruta = linha.trim()
+    if (!bruta || bruta.startsWith('#')) continue
+
+    // "Nome <email>"
+    const comAngulo = bruta.match(/^(.*?)<([^>]+)>\s*$/)
+    if (comAngulo) {
+      saida.push({
+        nome: comAngulo[1]!.trim().replace(/^["']|["']$/g, ''),
+        email: comAngulo[2]!.trim(),
+        empresa: '',
+        extras: {}
+      })
+      continue
+    }
+
+    // separado por ; ou , ou tab
+    const partes = bruta.split(/[;,\t]/).map(p => p.trim())
+    if (partes.length > 1) {
+      // o e-mail pode estar em qualquer posicao: procuramos pelo @
+      const idx = partes.findIndex(p => p.includes('@'))
+      const email = idx >= 0 ? partes[idx]! : partes[1]!
+      const resto = partes.filter((_, i) => i !== (idx >= 0 ? idx : 1))
+      saida.push({
+        nome: resto[0] || '',
+        email,
+        empresa: resto[1] || '',
+        extras: {}
+      })
+      continue
+    }
+
+    saida.push({ nome: '', email: bruta, empresa: '', extras: {} })
+  }
+
+  return saida
+}

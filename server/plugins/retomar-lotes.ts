@@ -1,16 +1,36 @@
 import { eq } from 'drizzle-orm'
 import { useDb, batches } from '../db'
 import { destravarOrfaos, iniciarLote } from '../utils/sender'
-import { checarBaseUrl } from '../utils/urls'
+import { checarBaseUrl, checarAlcancePublico } from '../utils/urls'
 import { garantirTemplatePadrao } from '../utils/seed'
+import { aplicarMigrations } from '../utils/migrations'
 
 /**
- * No boot: avisa sobre configuracao invalida e retoma qualquer lote que
- * estava enviando quando o processo caiu, sem reenviar quem ja recebeu.
+ * Boot da aplicacao, em qualquer ambiente:
+ *  1. aplica as migrations pendentes (idempotentes, so tabelas sys_mail_*);
+ *  2. cria o template padrao na primeira execucao;
+ *  3. retoma lotes que estavam enviando quando o processo caiu.
  */
 export default defineNitroPlugin(async () => {
   const aviso = checarBaseUrl()
   if (aviso) console.warn(`[gaulke-mail] ATENCAO: ${aviso}`)
+
+  // DNS uma vez so: avisa se URL_ACESSO aponta para a rede interna
+  const alcance = await checarAlcancePublico()
+  if (alcance) console.warn(`[gaulke-mail] ATENCAO: ${alcance}`)
+
+  // Antes de qualquer consulta: sem as tabelas, tudo abaixo falharia.
+  const migr = await aplicarMigrations()
+  if (!migr.ok) {
+    // Nao derrubamos o processo de proposito: um container em crash-loop
+    // esconde o log que explica o problema. O erro fica visivel aqui e no
+    // /api/admin/status, e a aplicacao sobe para poder ser diagnosticada.
+    console.error(`[gaulke-mail] FALHA nas migrations: ${migr.erro}`)
+    return
+  }
+  if (migr.aplicadas.length) {
+    console.info(`[gaulke-mail] migrations aplicadas: ${migr.aplicadas.join(', ')}`)
+  }
 
   try {
     await garantirTemplatePadrao()

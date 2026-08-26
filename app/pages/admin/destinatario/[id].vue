@@ -114,13 +114,32 @@ const MARCOS = computed(() => [
               <dd><NuxtLink :to="`/admin/lotes/${data.loteId}`" class="text-primary hover:underline">{{ data.loteNome }}</NuxtLink></dd>
             </div>
             <div>
-              <dt class="text-xs text-muted">Aberturas</dt>
+              <dt class="flex items-center gap-1 text-xs text-muted">
+                Aberturas do e-mail
+                <UTooltip text="Quantas vezes as imagens do e-mail foram carregadas. É medido por um pixel invisível na mensagem — não é o mesmo que abrir a página do documento.">
+                  <UIcon name="i-lucide-circle-help" class="size-3.5" />
+                </UTooltip>
+              </dt>
               <dd>
-                {{ d.openCount }}x
-                <span v-if="d.lastOpenAt" class="text-xs text-muted">· última {{ dataHora(d.lastOpenAt) }}</span>
-                <span v-if="d.openCount && !d.firstHumanOpenAt" class="block text-xs text-muted italic">
-                  todas parecem carregamento automático
-                </span>
+                <template v-if="d.openCount">
+                  {{ d.openCount }}x
+                  <span v-if="d.lastOpenAt" class="text-xs text-muted">· última {{ dataHora(d.lastOpenAt) }}</span>
+                  <span v-if="!d.firstHumanOpenAt" class="block text-xs italic text-muted">
+                    todas parecem carregamento automático
+                  </span>
+                </template>
+                <!--
+                  "0x" nao dizia nada a quem olhava. Zero aqui e comum e tem
+                  varias causas legitimas, entao a tela explica em vez de so
+                  mostrar o numero.
+                -->
+                <template v-else>
+                  <span class="text-muted">nenhuma detectada</span>
+                  <span class="block text-xs text-muted">
+                    Normal quando o cliente de e-mail bloqueia imagens, ou quando
+                    <code>URL_ACESSO</code> não é acessível pela internet.
+                  </span>
+                </template>
               </dd>
             </div>
             <div><dt class="text-xs text-muted">Downloads</dt><dd>{{ d.downloadCount }}x</dd></div>

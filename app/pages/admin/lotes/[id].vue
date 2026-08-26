@@ -34,10 +34,21 @@ function conectar() {
     log.value.unshift(p)
     if (log.value.length > 300) log.value.length = 300
 
-    // contadores vem junto do evento: atualiza sem bater no servidor
+    /**
+     * Os contadores vem junto do evento, entao a barra de progresso anda sem
+     * bater no servidor. Precisa TROCAR o objeto: o `data` do useFetch e um
+     * shallowRef, e escrever `data.value.lote.enviados = x` nao avisa o Vue —
+     * o progresso ficaria congelado durante todo o disparo.
+     */
     if (data.value && (p.enviados !== undefined || p.falhas !== undefined)) {
-      if (p.enviados !== undefined) data.value.lote.enviados = p.enviados
-      if (p.falhas !== undefined) data.value.lote.falhas = p.falhas
+      data.value = {
+        ...data.value,
+        lote: {
+          ...data.value.lote,
+          enviados: p.enviados ?? data.value.lote.enviados,
+          falhas: p.falhas ?? data.value.lote.falhas
+        }
+      }
     }
     if (['concluido', 'pausado', 'iniciado'].includes(p.tipo)) {
       refresh()

@@ -14,6 +14,23 @@ const PASSOS = [
 ]
 
 /* ---------- Passo 1: lista ---------- */
+type Origem = 'arquivo' | 'banco' | 'manual'
+const origem = ref<Origem>('arquivo')
+
+const ORIGENS = [
+  { valor: 'arquivo' as Origem, titulo: 'Importar arquivo', icone: 'i-lucide-file-spreadsheet', desc: 'CSV ou XLSX' },
+  { valor: 'banco' as Origem, titulo: 'Do banco', icone: 'i-lucide-database', desc: 'quem já recebeu antes' },
+  { valor: 'manual' as Origem, titulo: 'Digitar', icone: 'i-lucide-keyboard', desc: 'colar ou digitar' }
+]
+
+// o modelo mostrado na tela e o do download saem da MESMA fonte no servidor
+const COLUNAS_MODELO = ['Nome', 'E-mail', 'Empresa']
+const LINHAS_MODELO = [
+  ['Maria Oliveira', 'maria.oliveira@empresa.com.br', 'Empresa Exemplo LTDA'],
+  ['Joao Souza', 'joao.souza@outraempresa.com.br', 'Outra Empresa ME'],
+  ['', 'contato@terceiraempresa.com.br', 'Terceira Empresa SA']
+]
+
 /**
  * O USelect (Reka UI) reserva a string vazia para "sem selecao", entao a
  * opcao "nenhuma coluna" precisa de um valor proprio.
@@ -48,41 +65,181 @@ async function importar(e: Event) {
   }
 }
 
-const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
-
-/** Mesma validacao do servidor, para o operador ver o resultado antes de criar. */
-const listaProcessada = computed(() => {
-  if (!importado.value || mapa.email === SEM_COLUNA) return { validos: [], rejeitados: [] as any[] }
-  const validos: any[] = []
-  const rejeitados: any[] = []
-  const vistos = new Set<string>()
-
-  importado.value.linhas.forEach((l: any, i: number) => {
-    const email = String(l[mapa.email] || '').trim().toLowerCase()
-    if (!email) return rejeitados.push({ linha: i + 2, email: '', motivo: 'E-mail em branco' })
-    if (!RE_EMAIL.test(email)) return rejeitados.push({ linha: i + 2, email, motivo: 'E-mail inválido' })
-    if (vistos.has(email)) return rejeitados.push({ linha: i + 2, email, motivo: 'Duplicado na lista' })
-    vistos.add(email)
-
-    const extras: Record<string, string> = {}
-    for (const c of colunasExtras.value) if (l[c]) extras[c] = String(l[c])
-
-    validos.push({
-      email,
-      nome: mapa.nome === SEM_COLUNA ? '' : String(l[mapa.nome] || ''),
-      empresa: mapa.empresa === SEM_COLUNA ? '' : String(l[mapa.empresa] || ''),
-      extras
-    })
-  })
-  return { validos, rejeitados }
-})
-
 const opcoesColunas = computed(() =>
   [
     { label: '— nenhuma —', value: SEM_COLUNA },
     ...(importado.value?.colunas || []).map((c: string) => ({ label: c, value: c }))
   ]
 )
+
+/* ---------- Passo 1b: contatos que já estão no banco ---------- */
+const CONTATOS_MARCOS = [
+  { label: 'Todos os contatos', value: 'todos' },
+  { label: 'Não confirmaram a leitura', value: 'nao-confirmou' },
+  { label: 'Não acessaram a página', value: 'nao-acessou' },
+  { label: 'Não baixaram o arquivo', value: 'nao-baixou' },
+  { label: 'Confirmaram a leitura', value: 'confirmou' },
+  { label: 'Tiveram erro no envio', value: 'erro' }
+]
+
+const filtroContatos = reactive({ busca: '', marco: 'todos', batchId: 0 })
+
+/**
+ * A seleção guarda o CONTATO INTEIRO, indexado por e-mail — e não só os
+ * e-mails visíveis na tela. Se guardasse apenas os e-mails, trocar o filtro
+ * removeria da lista quem já tinha sido marcado, e a pessoa sairia do envio
+ * sem ninguém perceber.
+ */
+const escolhidos = ref<Record<string, { email: string; nome: string; empresa: string }>>({})
+const selecionados = computed(() => Object.keys(escolhidos.value))
+
+function alternarContato(c: Contato) {
+  if (escolhidos.value[c.email]) {
+    const { [c.email]: _removido, ...resto } = escolhidos.value
+    escolhidos.value = resto
+    return
+  }
+  escolhidos.value = {
+    ...escolhidos.value,
+    [c.email]: { email: c.email, nome: c.nome || '', empresa: c.empresa || '' }
+  }
+}
+
+const consultaContatos = computed(() => ({
+  busca: filtroContatos.busca || undefined,
+  marco: filtroContatos.marco === 'todos' ? undefined : filtroContatos.marco,
+  batchId: filtroContatos.batchId || undefined
+}))
+
+const { data: contatosData, status: carregandoContatos } = await useFetch<RespostaContatos>(
+  api('/api/admin/contatos'),
+  { query: consultaContatos, watch: [consultaContatos], lazy: true, server: false }
+)
+
+const contatos = computed(() => contatosData.value?.contatos || [])
+
+// "todos" se refere ao que está VISÍVEL agora, não ao banco inteiro
+const todosMarcados = computed(
+  () => contatos.value.length > 0 && contatos.value.every(c => !!escolhidos.value[c.email])
+)
+
+function alternarTodos() {
+  if (todosMarcados.value) {
+    const resto = { ...escolhidos.value }
+    for (const c of contatos.value) delete resto[c.email]
+    escolhidos.value = resto
+    return
+  }
+  const adicionados = { ...escolhidos.value }
+  for (const c of contatos.value) {
+    adicionados[c.email] = { email: c.email, nome: c.nome || '', empresa: c.empresa || '' }
+  }
+  escolhidos.value = adicionados
+}
+
+// lotes anteriores, só para filtrar a origem dos contatos
+const { data: lotesData } = await useFetch<RespostaLotes>(api('/api/admin/batches'), {
+  lazy: true,
+  server: false
+})
+
+const opcoesLotesOrigem = computed(() => [
+  { label: 'Qualquer lote', value: 0 },
+  ...(lotesData.value?.lotes || []).map(l => ({ label: l.nome, value: l.id }))
+])
+
+/* ---------- Passo 1c: digitação manual ---------- */
+const textoManual = ref('')
+
+/**
+ * Aceita os formatos que a pessoa naturalmente digita ou cola:
+ *   email@x.com | Nome <email@x.com> | Nome; email@x.com; Empresa
+ * A validação e a deduplicação acontecem depois, no mesmo caminho da planilha.
+ */
+function lerListaDigitada(texto: string) {
+  const saida: { nome: string; email: string; empresa: string; extras: Record<string, string> }[] = []
+
+  for (const linha of texto.split(/[\r\n]+/)) {
+    const bruta = linha.trim()
+    if (!bruta || bruta.startsWith('#')) continue
+
+    const comAngulo = bruta.match(/^(.*?)<([^>]+)>\s*$/)
+    if (comAngulo) {
+      saida.push({
+        nome: comAngulo[1]!.trim().replace(/^["']|["']$/g, ''),
+        email: comAngulo[2]!.trim(),
+        empresa: '',
+        extras: {}
+      })
+      continue
+    }
+
+    const partes = bruta.split(/[;,\t]/).map(p => p.trim())
+    if (partes.length > 1) {
+      const idx = partes.findIndex(p => p.includes('@'))
+      const email = idx >= 0 ? partes[idx]! : partes[1]!
+      const resto = partes.filter((_, i) => i !== (idx >= 0 ? idx : 1))
+      saida.push({ nome: resto[0] || '', email, empresa: resto[1] || '', extras: {} })
+      continue
+    }
+
+    saida.push({ nome: '', email: bruta, empresa: '', extras: {} })
+  }
+
+  return saida
+}
+
+/* ---------- As três origens viram uma lista só ---------- */
+const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+/**
+ * Cada origem produz linhas cruas no mesmo formato; a validação e a
+ * deduplicação são feitas UMA vez, logo abaixo. Sem isso, cada aba
+ * repetiria as regras e elas divergiriam com o tempo.
+ */
+const linhasBrutas = computed(() => {
+  if (origem.value === 'arquivo') {
+    if (!importado.value || mapa.email === SEM_COLUNA) return []
+    return importado.value.linhas.map((l: any) => {
+      const extras: Record<string, string> = {}
+      for (const c of colunasExtras.value) if (l[c]) extras[c] = String(l[c])
+      return {
+        email: String(l[mapa.email] || ''),
+        nome: mapa.nome === SEM_COLUNA ? '' : String(l[mapa.nome] || ''),
+        empresa: mapa.empresa === SEM_COLUNA ? '' : String(l[mapa.empresa] || ''),
+        extras
+      }
+    })
+  }
+
+  if (origem.value === 'banco') {
+    return Object.values(escolhidos.value).map(c => ({ ...c, extras: {} }))
+  }
+
+  return lerListaDigitada(textoManual.value)
+})
+
+/** Mesma validação do servidor, para o operador ver o resultado antes de criar. */
+const listaProcessada = computed(() => {
+  const validos: any[] = []
+  const rejeitados: any[] = []
+  const vistos = new Set<string>()
+
+  linhasBrutas.value.forEach((l: any, i: number) => {
+    // na planilha a linha 1 é o cabeçalho, então a contagem começa em 2
+    const numero = origem.value === 'arquivo' ? i + 2 : i + 1
+    const email = String(l.email || '').trim().toLowerCase()
+
+    if (!email) return rejeitados.push({ linha: numero, email: '', motivo: 'E-mail em branco' })
+    if (!RE_EMAIL.test(email)) return rejeitados.push({ linha: numero, email, motivo: 'E-mail inválido' })
+    if (vistos.has(email)) return rejeitados.push({ linha: numero, email, motivo: 'Duplicado na lista' })
+    vistos.add(email)
+
+    validos.push({ email, nome: l.nome || '', empresa: l.empresa || '', extras: l.extras || {} })
+  })
+
+  return { validos, rejeitados }
+})
 
 /* ---------- Passo 2: arquivo ---------- */
 const { data: arquivos, refresh: recarregarArquivos } = await useFetch<RespostaArquivos>(api('/api/admin/arquivos'))
@@ -215,20 +372,80 @@ async function criarLote() {
       <template #header><h2 class="font-semibold">1. Lista de destinatários</h2></template>
 
       <div class="space-y-5">
-        <div class="rounded-lg border border-dashed border-default p-6 text-center">
-          <UIcon name="i-lucide-file-spreadsheet" class="mx-auto size-10 text-muted" />
-          <p class="mt-2 text-sm font-medium">Importe um arquivo CSV ou XLSX</p>
-          <p class="text-xs text-muted">A primeira linha deve conter os nomes das colunas.</p>
-          <label class="mt-3 inline-block">
-            <input type="file" accept=".csv,.txt,.xlsx,.xls" class="hidden" @change="importar" >
-            <span
-              class="inline-flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-inverted"
-            >
-              <UIcon :name="importando ? 'i-lucide-loader-circle' : 'i-lucide-upload'" :class="importando && 'animate-spin'" />
-              {{ importando ? 'Lendo...' : 'Escolher arquivo' }}
-            </span>
-          </label>
+        <!-- Escolha da origem -->
+        <div class="grid gap-3 sm:grid-cols-3">
+          <button
+            v-for="o in ORIGENS"
+            :key="o.valor"
+            class="flex items-center gap-3 rounded-lg border p-3 text-left transition"
+            :class="origem === o.valor ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
+            @click="origem = o.valor"
+          >
+            <UIcon :name="o.icone" class="size-6 shrink-0" :class="origem === o.valor ? 'text-primary' : 'text-muted'" />
+            <div class="min-w-0">
+              <p class="text-sm font-medium">{{ o.titulo }}</p>
+              <p class="truncate text-xs text-muted">{{ o.desc }}</p>
+            </div>
+          </button>
         </div>
+
+        <!-- ORIGEM: ARQUIVO -->
+        <template v-if="origem === 'arquivo'">
+          <!-- Formato esperado: documentado na tela, não só no README -->
+          <div class="rounded-lg border border-default bg-elevated/40 p-4">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p class="text-sm font-medium">Como o arquivo deve estar</p>
+              <UButton
+                :to="api('/api/admin/modelo-lista')"
+                external
+                icon="i-lucide-download"
+                label="Baixar modelo CSV"
+                size="xs"
+                color="neutral"
+                variant="outline"
+              />
+            </div>
+
+            <div class="overflow-x-auto rounded border border-default bg-default">
+              <table class="w-full text-xs">
+                <thead class="bg-elevated/60 text-left">
+                  <tr>
+                    <th v-for="c in COLUNAS_MODELO" :key="c" class="border-r border-default px-3 py-2 font-semibold last:border-0">
+                      {{ c }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(l, i) in LINHAS_MODELO" :key="i" class="border-t border-default">
+                    <td v-for="(v, j) in l" :key="j" class="border-r border-default px-3 py-1.5 last:border-0">
+                      {{ v || '—' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <ul class="mt-3 space-y-1 text-xs text-muted">
+              <li>· <strong>E-mail</strong> é a única coluna obrigatória. Nome e Empresa são opcionais.</li>
+              <li>· Os nomes das colunas não precisam ser exatos — na etapa seguinte você confere o que o sistema detectou.</li>
+              <li>· Colunas a mais podem ser guardadas como variáveis e usadas no HTML do e-mail.</li>
+              <li>· CSV separado por <code>;</code> ou <code>,</code> (detectado automaticamente) ou XLSX. Até 20.000 linhas.</li>
+              <li>· E-mails repetidos e inválidos são descartados, e a tela mostra quais.</li>
+            </ul>
+          </div>
+
+          <div class="rounded-lg border border-dashed border-default p-6 text-center">
+            <UIcon name="i-lucide-file-spreadsheet" class="mx-auto size-10 text-muted" />
+            <p class="mt-2 text-sm font-medium">Importe um arquivo CSV ou XLSX</p>
+            <p class="text-xs text-muted">A primeira linha deve conter os nomes das colunas.</p>
+            <label class="mt-3 inline-block">
+              <input type="file" accept=".csv,.txt,.xlsx,.xls" class="hidden" @change="importar" >
+              <span class="inline-flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-inverted">
+                <UIcon :name="importando ? 'i-lucide-loader-circle' : 'i-lucide-upload'" :class="importando && 'animate-spin'" />
+                {{ importando ? 'Lendo...' : 'Escolher arquivo' }}
+              </span>
+            </label>
+          </div>
 
         <template v-if="importado">
           <USeparator label="Mapeamento de colunas" />
@@ -257,6 +474,120 @@ async function criarLote() {
             />
           </UFormField>
 
+        </template>
+        </template>
+
+        <!-- ORIGEM: BANCO -->
+        <template v-else-if="origem === 'banco'">
+          <UAlert
+            color="info"
+            variant="subtle"
+            icon="i-lucide-info"
+            title="Contatos de envios anteriores"
+            description="Cada pessoa aparece uma vez, com o nome e a empresa do envio mais recente dela. Útil para reenviar só para quem não confirmou a leitura."
+          />
+
+          <div class="grid gap-3 sm:grid-cols-3">
+            <UFormField label="Buscar">
+              <UInput v-model="filtroContatos.busca" icon="i-lucide-search" placeholder="Nome, e-mail ou empresa" class="w-full" />
+            </UFormField>
+            <UFormField label="Comportamento">
+              <USelect v-model="filtroContatos.marco" :items="CONTATOS_MARCOS" class="w-full" />
+            </UFormField>
+            <UFormField label="Lote de origem">
+              <USelect v-model="filtroContatos.batchId" :items="opcoesLotesOrigem" class="w-full" />
+            </UFormField>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm text-muted">
+              {{ contatos.length }} contato(s) encontrados
+              <span v-if="contatosData"> de {{ contatosData.totalGeral }} no banco</span>
+            </p>
+            <div class="flex gap-2">
+              <UButton
+                :label="todosMarcados ? 'Desmarcar todos' : 'Marcar todos'"
+                :icon="todosMarcados ? 'i-lucide-square' : 'i-lucide-check-square'"
+                size="xs"
+                color="neutral"
+                variant="outline"
+                :disabled="!contatos.length"
+                @click="alternarTodos"
+              />
+              <UBadge v-if="selecionados.length" color="primary" variant="subtle" :label="`${selecionados.length} selecionado(s)`" />
+            </div>
+          </div>
+
+          <div class="max-h-96 overflow-y-auto rounded-lg border border-default">
+            <p v-if="carregandoContatos === 'pending'" class="py-8 text-center text-sm text-muted">Carregando…</p>
+            <p v-else-if="!contatos.length" class="py-8 text-center text-sm text-muted">
+              Nenhum contato encontrado com esses filtros.
+            </p>
+            <table v-else class="w-full text-sm">
+              <thead class="sticky top-0 bg-default text-left text-xs uppercase text-muted">
+                <tr>
+                  <th class="w-10 px-3 py-2" />
+                  <th class="px-3 py-2">Contato</th>
+                  <th class="px-3 py-2">Último lote</th>
+                  <th class="px-3 py-2">Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="c in contatos"
+                  :key="c.email"
+                  class="cursor-pointer border-t border-default hover:bg-elevated/30"
+                  @click="alternarContato(c)"
+                >
+                  <td class="px-3 py-2">
+                    <UCheckbox :model-value="!!escolhidos[c.email]" @click.stop="alternarContato(c)" />
+                  </td>
+                  <td class="max-w-[260px] px-3 py-2">
+                    <p class="truncate font-medium">{{ c.nome || '—' }}</p>
+                    <p class="truncate text-xs text-muted">{{ c.email }}</p>
+                    <p v-if="c.empresa" class="truncate text-xs text-muted">{{ c.empresa }}</p>
+                  </td>
+                  <td class="max-w-[160px] truncate px-3 py-2 text-xs text-muted">{{ c.loteNome }}</td>
+                  <td class="px-3 py-2">
+                    <UBadge v-if="c.confirmedAt" color="success" variant="subtle" size="xs" label="confirmou" />
+                    <UBadge v-else-if="c.status === 'erro'" color="error" variant="subtle" size="xs" label="falhou" />
+                    <UBadge v-else-if="c.sentAt" color="neutral" variant="subtle" size="xs" label="não confirmou" />
+                    <UBadge v-else color="neutral" variant="subtle" size="xs" label="não enviado" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <!-- ORIGEM: MANUAL -->
+        <template v-else>
+          <UFormField label="Um destinatário por linha">
+            <UTextarea
+              v-model="textoManual"
+              :rows="10"
+              class="w-full"
+              :ui="{ base: 'font-mono text-xs' }"
+              placeholder="maria.oliveira@empresa.com.br&#10;Joao Souza <joao.souza@empresa.com.br>&#10;Ana Lima; ana.lima@empresa.com.br; Empresa Exemplo LTDA"
+              spellcheck="false"
+            />
+          </UFormField>
+
+          <div class="rounded-lg border border-default bg-elevated/40 p-4">
+            <p class="mb-2 text-xs font-medium text-muted">Formatos aceitos (pode misturar)</p>
+            <ul class="space-y-1 font-mono text-xs">
+              <li>maria.oliveira@empresa.com.br</li>
+              <li>Joao Souza &lt;joao.souza@empresa.com.br&gt;</li>
+              <li>Ana Lima; ana.lima@empresa.com.br; Empresa Exemplo LTDA</li>
+              <li>Ana Lima, ana.lima@empresa.com.br, Empresa Exemplo LTDA</li>
+            </ul>
+            <p class="mt-2 text-xs text-muted">Linhas começando com <code>#</code> são ignoradas.</p>
+          </div>
+        </template>
+
+        <!-- Resultado, comum às três origens -->
+        <template v-if="linhasBrutas.length">
+          <USeparator />
           <div class="grid gap-3 sm:grid-cols-2">
             <UAlert
               color="success"

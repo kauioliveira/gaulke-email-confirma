@@ -70,6 +70,12 @@ export default defineNuxtConfig({
     public: {
       // URL_ACESSO: base publica usada em TODOS os links do e-mail
       urlAcesso: process.env.URL_ACESSO || "",
+      // WhatsApp da empresa, no formato internacional e so digitos
+      // (55 + DDD + numero). Vazio esconde o botao flutuante da landing.
+      whatsapp: (process.env.WHATSAPP_NUMERO || "554730127300").replace(
+        /\D/g,
+        "",
+      ),
     },
   },
 

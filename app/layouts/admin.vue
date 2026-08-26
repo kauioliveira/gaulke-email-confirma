@@ -52,6 +52,14 @@ async function sair() {
           <UTooltip v-if="status?.urlAcesso.aviso" :text="status.urlAcesso.aviso">
             <UBadge color="warning" variant="subtle" icon="i-lucide-link-2-off" label="URL_ACESSO" />
           </UTooltip>
+          <!--
+            URL_ACESSO resolvendo para IP interno: o sistema funciona pela
+            metade e sem esse aviso ninguem descobre — os links abrem de dentro
+            da rede, mas a logo e o pixel do e-mail nunca carregam.
+          -->
+          <UTooltip v-else-if="status?.urlAcesso.alcance" :text="status.urlAcesso.alcance">
+            <UBadge color="warning" variant="subtle" icon="i-lucide-globe-lock" label="rede interna" />
+          </UTooltip>
           <UColorModeButton />
           <UButton icon="i-lucide-log-out" color="neutral" variant="ghost" size="sm" @click="sair" />
         </div>

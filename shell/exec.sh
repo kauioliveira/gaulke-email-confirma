@@ -20,9 +20,9 @@ ENV_FILE=".env.production"
 usage() {
     echo
     echo "Uso:"
-    echo "  $0 up        # carrega a imagem, aplica migrations e sobe"
+    echo "  $0 up        # carrega a imagem e sobe (as migrations correm no boot)"
     echo "  $0 stop      # derruba os contêineres"
-    echo "  $0 migrate   # só as migrations, sem mexer no que está no ar"
+    echo "  $0 migrate   # aplica as migrations SEM subir a aplicação"
     echo "  $0 logs      # acompanha o log da aplicação"
     echo
     exit 1
@@ -37,14 +37,13 @@ require_env_file() {
     fi
 }
 
-# As migrations rodam num contêiner DESCARTÁVEL, e não no que está servindo.
+# A APLICAÇÃO JÁ APLICA AS MIGRATIONS SOZINHA NO BOOT, em qualquer ambiente
+# (server/plugins/retomar-lotes.ts). Este comando existe só para o caso de
+# você querer aplicá-las SEM subir nada — conferir um schema, por exemplo.
 #
-# São idempotentes (CREATE TABLE IF NOT EXISTS, controle em sys_mail_migrations)
-# e o scripts/migrate.mjs recusa qualquer arquivo com DROP/TRUNCATE — este banco
-# é compartilhado com os outros sistemas da empresa.
-#
-# Roda ANTES do `up` de propósito: subindo com as tabelas faltando, a aplicação
-# entra no ar quebrada e o erro só aparece quando alguém abre o relatório.
+# Roda num contêiner descartável, nunca no que está servindo. São idempotentes,
+# um advisory lock serializa execuções concorrentes, e qualquer DROP/TRUNCATE é
+# recusado: este banco é compartilhado com os outros sistemas da empresa.
 run_migrations() {
     echo "==> Aplicando migrations (sys_mail_*)"
     docker run --rm --env-file "$ENV_FILE" "$IMAGE_NAME" node scripts/migrate.mjs
@@ -86,9 +85,8 @@ case "$1" in
         echo "==> Carregando imagem Docker"
         docker load -i "$TAR_FILE"
 
-        echo
-        run_migrations
-
+        # Sem passo de migration aqui: a aplicação aplica no próprio boot.
+        # Se algo falhar, o log diz, e o /api/admin/status mostra o erro.
         echo
         echo "==> Subindo containers"
         docker compose --env-file "$ENV_FILE" up -d --force-recreate

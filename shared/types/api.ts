@@ -141,8 +141,15 @@ export interface RespostaArquivos {
 }
 export interface RespostaStatus {
   smtp: { ok: boolean; mensagem: string; host: string; port: number; from: string; habilitado: boolean }
-  urlAcesso: { valor: string; aviso: string | null }
+  urlAcesso: { valor: string; aviso: string | null; alcance: string | null }
   lotesAtivos: number[]
+  migrations: {
+    ok: boolean
+    aplicadas: string[]
+    pendentesAntes: number
+    erro?: string
+    em: string
+  } | null
 }
 export interface RespostaLanding {
   nome: string | null
@@ -163,4 +170,23 @@ export interface RespostaImportacao {
   sugestao: { email: string; nome: string; empresa: string }
   previa: Record<string, string>[]
   linhas: Record<string, string>[]
+}
+
+export interface Contato {
+  email: string
+  nome: string | null
+  empresa: string | null
+  loteNome: string
+  loteId: number
+  sentAt: string | null
+  confirmedAt: string | null
+  firstDownloadAt: string | null
+  status: StatusDestinatario
+}
+
+export interface RespostaContatos {
+  contatos: Contato[]
+  total: number
+  /** quantos e-mails distintos existem no banco, ignorando os filtros */
+  totalGeral: number
 }
