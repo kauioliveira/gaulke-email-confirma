@@ -4,11 +4,22 @@ const links = [
   { label: 'Lotes', icon: 'i-lucide-layers', to: '/admin/lotes' },
   { label: 'Novo envio', icon: 'i-lucide-plus-circle', to: '/admin/lotes/novo' },
   { label: 'Templates', icon: 'i-lucide-file-code-2', to: '/admin/templates' },
-  { label: 'Relatório', icon: 'i-lucide-chart-no-axes-column', to: '/admin/relatorio' }
+  { label: 'Relatório', icon: 'i-lucide-chart-no-axes-column', to: '/admin/relatorio' },
+  { label: 'Configurações', icon: 'i-lucide-settings', to: '/admin/configuracoes' }
 ]
 
 const { data: status } = await useFetch<RespostaStatus>(api('/api/admin/status'), { lazy: true, server: false })
 
+const { data: sessao } = await useFetch<RespostaSessao>(api('/api/admin/sessao'), {
+  headers: import.meta.server ? useRequestHeaders(['cookie']) : undefined
+})
+const peloPainel = computed(() => sessao.value?.origem === 'painel')
+
+/**
+ * Sair so faz sentido para quem entrou pela senha. Com a sessao do painel nao
+ * ha nada nosso para encerrar: apagar o cookie daqui deslogaria a pessoa do
+ * painel inteiro, e o login voltaria a reconhece-la em seguida.
+ */
 async function sair() {
   await $fetch(api('/api/admin/logout'), { method: 'POST' })
   await navigateTo('/admin/login')
@@ -60,8 +71,26 @@ async function sair() {
           <UTooltip v-else-if="status?.urlAcesso.alcance" :text="status.urlAcesso.alcance">
             <UBadge color="warning" variant="subtle" icon="i-lucide-globe-lock" label="rede interna" />
           </UTooltip>
+          <UTooltip v-if="status?.painel.aviso" :text="status.painel.aviso">
+            <UBadge color="warning" variant="subtle" icon="i-lucide-key-round" label="painel" />
+          </UTooltip>
           <UColorModeButton />
-          <UButton icon="i-lucide-log-out" color="neutral" variant="ghost" size="sm" @click="sair" />
+          <UTooltip
+            v-if="peloPainel"
+            :text="`Conectado pela sua sessão do painel${sessao?.usuario?.email ? ` (${sessao.usuario.email})` : ''}`"
+          >
+            <UBadge color="neutral" variant="subtle" icon="i-lucide-user-check">
+              <span class="max-w-[10rem] truncate">{{ sessao?.usuario?.nome }}</span>
+            </UBadge>
+          </UTooltip>
+          <UButton
+            v-else
+            icon="i-lucide-log-out"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            @click="sair"
+          />
         </div>
       </div>
 

@@ -27,6 +27,41 @@ export interface Template {
   updatedAt: string
 }
 
+/** Conta de envio (SMTP). A senha nunca chega ao cliente. */
+export interface ContaEnvio {
+  id: number
+  nome: string
+  host: string
+  port: number
+  secure: boolean
+  requireTls: boolean
+  rejectUnauthorized: boolean
+  usuario: string
+  remetente: string
+  responderPara: string | null
+  ativa: boolean
+  padrao: boolean
+  ultimoTesteEm: string | null
+  ultimoTesteOk: boolean | null
+  ultimoTesteMsg: string | null
+  criadoPorNome: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RespostaContas {
+  contas: ContaEnvio[]
+  /** sem a chave no .env nao da para guardar senha nenhuma */
+  chave: { configurada: boolean; impressao: string | null }
+  /** valores do .env, oferecidos como ponto de partida no cadastro */
+  sugestao: { host: string; port: number; secure: boolean; requireTls: boolean }
+}
+
+export interface RespostaTesteConta {
+  ok: boolean
+  mensagem: string
+}
+
 export interface Lote {
   id: number
   nome: string
@@ -49,6 +84,15 @@ export interface Lote {
   agendadoEm: string | null
   /** motivo quando o proprio sistema mudou o status do lote */
   observacao: string | null
+  /**
+   * Autoria. Nula em lotes criados antes do login pela sessao do painel, e
+   * tambem quando se entrou pela senha do .env — que e anonima por natureza.
+   */
+  criadoPorNome: string | null
+  disparadoPorNome: string | null
+  /** conta de envio usada; o nome e snapshot e sobrevive a exclusao da conta */
+  contaId: number | null
+  contaNome: string | null
   workerAtivo?: boolean
 }
 
@@ -115,6 +159,7 @@ export interface ResumoRelatorio {
 
 export interface LinhaRelatorio extends Omit<Destinatario, 'dadosExtras'> {
   loteNome: string
+  loteDisparadoPor: string | null
   ultimoIp: string | null
 }
 
@@ -163,9 +208,26 @@ export interface RespostaArquivos {
   arquivos: { nome: string; tamanho: number; modificadoEm: string }[]
 }
 export interface RespostaStatus {
-  smtp: { ok: boolean; mensagem: string; host: string; port: number; from: string; habilitado: boolean }
+  smtp: {
+    ok: boolean
+    mensagem: string
+    host: string
+    port: number
+    from: string
+    habilitado: boolean
+    /** conta que seria usada agora; id nulo = a herdada do .env */
+    conta: { id: number | null; nome: string } | null
+    chaveConfigurada: boolean
+  }
   urlAcesso: { valor: string; aviso: string | null; alcance: string | null }
   lotesAtivos: number[]
+  painel: {
+    tabelaOk: boolean
+    cookie: 'reconhecido' | 'nao-reconhecido' | 'ausente'
+    nomeCookie: string
+    usuario: string | null
+    aviso: string | null
+  }
   migrations: {
     ok: boolean
     aplicadas: string[]
@@ -231,4 +293,13 @@ export interface RespostaPessoas {
   total: number
   /** quantos existem ao todo, ignorando a busca */
   totais: { equipe: number; cliente: number }
+}
+
+/** De onde veio a credencial do operador. */
+export type OrigemSessao = 'painel' | 'senha' | 'painel-sem-permissao' | 'painel-invalido' | 'nenhuma'
+
+export interface RespostaSessao {
+  autenticado: boolean
+  origem: OrigemSessao
+  usuario: { nome: string; email: string | null; isAdmin: boolean } | null
 }

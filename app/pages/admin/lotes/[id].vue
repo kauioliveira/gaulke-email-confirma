@@ -150,7 +150,13 @@ const CORES_LOG: Record<string, string> = {
         <p class="mt-1 text-sm text-muted">{{ data.lote.assuntoSnapshot }}</p>
         <p class="text-xs text-muted">
           Criado em {{ dataHora(data.lote.createdAt) }}
+          <template v-if="data.lote.criadoPorNome"> por {{ data.lote.criadoPorNome }}</template>
           <template v-if="data.lote.arquivoNome"> · {{ data.lote.arquivoNome }}</template>
+        </p>
+        <!-- quem apertou o botao: e o que o relatorio precisa provar -->
+        <p v-if="data.lote.disparadoPorNome" class="mt-1 flex items-center gap-1.5 text-xs text-muted">
+          <UIcon name="i-lucide-user-check" class="size-3.5" />
+          Disparado por {{ data.lote.disparadoPorNome }}
         </p>
         <p v-if="data.lote.agendadoPara" class="mt-1 flex items-center gap-1.5 text-xs" :class="agendado ? 'text-info' : 'text-muted'">
           <UIcon name="i-lucide-calendar-clock" class="size-3.5" />

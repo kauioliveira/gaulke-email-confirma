@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   pgTable,
   serial,
@@ -14,6 +15,53 @@ import {
  * Todas as tabelas deste sistema usam o prefixo `sys_mail_` para nao se
  * misturarem com as demais tabelas do banco da empresa.
  */
+
+/**
+ * Contas de envio (SMTP).
+ *
+ * O host costuma ser o mesmo para todo mundo, mas usuario e senha mudam por
+ * setor — por isso a conta guarda o conjunto inteiro em vez de so as
+ * credenciais. A senha fica CIFRADA (server/utils/cripto.ts): o SMTP precisa
+ * dela em claro para autenticar, entao hash nao serve.
+ *
+ * Os booleanos sao varchar('true'|'false') para seguir o resto do schema.
+ */
+export const accounts = pgTable(
+  'sys_mail_accounts',
+  {
+    id: serial('id').primaryKey(),
+    /** rotulo humano: "Notifica", "Financeiro" */
+    nome: varchar('nome', { length: 120 }).notNull(),
+    host: varchar('host', { length: 200 }).notNull(),
+    port: integer('port').default(587).notNull(),
+    secure: varchar('secure', { length: 5 }).default('false').notNull(),
+    requireTls: varchar('require_tls', { length: 5 }).default('true').notNull(),
+    rejectUnauthorized: varchar('reject_unauthorized', { length: 5 }).default('true').notNull(),
+    usuario: varchar('usuario', { length: 200 }).notNull(),
+    /** v1:<iv>:<tag>:<cifrado>, base64url — NUNCA sai numa resposta da API */
+    senhaCifrada: text('senha_cifrada').notNull(),
+    /** cabecalho From, no formato Nome <email@dominio> */
+    remetente: varchar('remetente', { length: 300 }).notNull(),
+    responderPara: varchar('responder_para', { length: 300 }),
+    ativa: varchar('ativa', { length: 5 }).default('true').notNull(),
+    padrao: varchar('padrao', { length: 5 }).default('false').notNull(),
+    // ultimo teste de conexao: a tela precisa poder dizer que a conta parou de
+    // funcionar depois de salva, e nao so no momento em que foi cadastrada
+    ultimoTesteEm: timestamp('ultimo_teste_em', { withTimezone: true }),
+    ultimoTesteOk: varchar('ultimo_teste_ok', { length: 5 }),
+    ultimoTesteMsg: text('ultimo_teste_msg'),
+    criadoPorNome: varchar('criado_por_nome', { length: 255 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+  },
+  t => [
+    uniqueIndex('sys_mail_accounts_nome_idx').on(sql`lower(${t.nome})`),
+    // so uma padrao por vez, garantido pelo banco
+    uniqueIndex('sys_mail_accounts_padrao_idx')
+      .on(t.padrao)
+      .where(sql`${t.padrao} = 'true'`)
+  ]
+)
 
 export const templates = pgTable('sys_mail_templates', {
   id: serial('id').primaryKey(),
@@ -52,6 +100,13 @@ export const batches = pgTable(
     total: integer('total').default(0).notNull(),
     enviados: integer('enviados').default(0).notNull(),
     falhas: integer('falhas').default(0).notNull(),
+    // Autoria: snapshot com nome, sem FK para public.users (tabela de outro
+    // sistema). O nome fica gravado para o relatorio continuar identificando
+    // quem disparou mesmo depois de a pessoa sair da empresa.
+    criadoPorUserId: integer('criado_por_user_id'),
+    criadoPorNome: varchar('criado_por_nome', { length: 255 }),
+    disparadoPorUserId: integer('disparado_por_user_id'),
+    disparadoPorNome: varchar('disparado_por_nome', { length: 255 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
@@ -59,7 +114,11 @@ export const batches = pgTable(
     agendadoPara: timestamp('agendado_para', { withTimezone: true }),
     agendadoEm: timestamp('agendado_em', { withTimezone: true }),
     // motivo quando o proprio sistema muda o status (ex.: agendamento vencido)
-    observacao: text('observacao')
+    observacao: text('observacao'),
+    // Conta de envio usada no disparo. O nome vai junto para o relatorio
+    // continuar dizendo de onde o e-mail saiu mesmo se a conta for excluida.
+    contaId: integer('conta_id').references(() => accounts.id, { onDelete: 'set null' }),
+    contaNome: varchar('conta_nome', { length: 120 })
   },
   t => [
     index('sys_mail_batches_status_idx').on(t.status),
@@ -133,6 +192,7 @@ export const events = pgTable(
   ]
 )
 
+export type Account = typeof accounts.$inferSelect
 export type Template = typeof templates.$inferSelect
 export type Batch = typeof batches.$inferSelect
 export type Recipient = typeof recipients.$inferSelect

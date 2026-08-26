@@ -12,23 +12,25 @@
  * Nada disso vale em producao: o build do Nitro nao tem essa checagem.
  */
 function hostsDeDesenvolvimento() {
-  const hosts = new Set<string>()
+  const hosts = new Set<string>();
 
-  const bruto = (process.env.URL_ACESSO || '').trim().replace(/^['"]|['"]$/g, '')
+  const bruto = (process.env.URL_ACESSO || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
   if (bruto) {
     try {
-      hosts.add(new URL(bruto).hostname)
+      hosts.add(new URL(bruto).hostname);
     } catch {
       // URL_ACESSO invalida ja e reportada no boot por server/utils/urls.ts
     }
   }
 
-  for (const extra of (process.env.DEV_HOSTS || '').split(',')) {
-    const h = extra.trim()
-    if (h) hosts.add(h)
+  for (const extra of (process.env.DEV_HOSTS || "").split(",")) {
+    const h = extra.trim();
+    if (h) hosts.add(h);
   }
 
-  return [...hosts]
+  return [...hosts];
 }
 
 export default defineNuxtConfig({
@@ -36,6 +38,14 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: ["@nuxt/ui"],
   css: ["~/assets/css/main.css"],
+
+  // Porta do dev. Vem de PORT no .env para nao ficar hardcoded; o valor aqui e
+  // so a rede de seguranca de quem clonar sem .env. Producao NAO passa por
+  // aqui: o container escuta 3000 fixo (Dockerfile) e quem publica no host e
+  // o APP_HOST_PORT gerado a partir de shell/deploy.conf.
+  devServer: {
+    port: Number(process.env.PORT) || 2005,
+  },
 
   vite: {
     server: {
@@ -76,6 +86,9 @@ export default defineNuxtConfig({
         /\D/g,
         "",
       ),
+      // Painel da Gaulke: para onde mandar quem chegou sem permissao. Vazio
+      // esconde o botao, em vez de oferecer um link que nao abre.
+      painelUrl: (process.env.PAINEL_URL || "").replace(/^["']|["']$/g, ""),
     },
   },
 

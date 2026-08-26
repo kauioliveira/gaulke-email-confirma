@@ -1,5 +1,13 @@
 <script setup lang="ts">
-definePageMeta({ layout: false });
+/**
+ * Página sempre clara, independente do tema do aparelho de quem recebe.
+ *
+ * Ela é a face da empresa para fora, e a marca tem cor fixa: a logo é escura
+ * (azul #323983), então num tema escuro ela sumiria — foi o que antes obrigou
+ * a colocá-la sobre uma placa branca, que aparecia como um quadrado. Fixar o
+ * tema resolve a causa em vez do sintoma. O painel interno segue com os dois.
+ */
+definePageMeta({ layout: false, colorMode: "light" });
 
 const route = useRoute();
 const toast = useToast();
@@ -113,16 +121,15 @@ const whatsapp = computed(() => {
       <template v-else-if="data">
         <div class="mb-8 flex flex-col items-center gap-3 text-center">
           <!--
-            A logo tem cores proprias (azul + laranja), entao no tema escuro
-            ela vai sobre uma placa clara em vez de uma versao recolorida.
+            Sem placa atrás: o PNG é transparente e a placa branca aparecia como
+            um quadrado sobre o fundo cinza da página. A legibilidade vem de a
+            página ser sempre clara (colorMode acima), e não de um fundo local.
           -->
-          <div class="rounded-xl bg-white px-5 py-3 dark:shadow-lg">
-            <img
-              :src="api('/brand/logo.png')"
-              alt="Contábil Gaulke"
-              class="h-12 w-auto"
-            />
-          </div>
+          <img
+            :src="api('/brand/logo.png')"
+            alt="Contábil Gaulke"
+            class="h-16 w-auto sm:h-20"
+          />
           <h1 class="text-2xl font-semibold">
             Olá, {{ data.nome || "tudo bem" }}!
           </h1>

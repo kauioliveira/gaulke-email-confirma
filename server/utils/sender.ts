@@ -1,6 +1,6 @@
 import { eq, sql, and } from 'drizzle-orm'
 import { useDb, useSql, batches, recipients, type Recipient, type Batch } from '../db'
-import { enviarEmail } from './mailer'
+import { enviarEmail, resolverConta, type ContaSmtp } from './mailer'
 import { renderizar, renderizarAssunto, versaoTexto } from './render'
 import { registrarEvento } from './tracking'
 import { useBatchBus } from './sse'
@@ -84,7 +84,7 @@ export async function destravarOrfaos(batchId?: number) {
   return r.length
 }
 
-async function enviarUm(lote: Batch, r: Recipient) {
+async function enviarUm(lote: Batch, r: Recipient, conta: ContaSmtp) {
   const vars = {
     nome: r.nome,
     email: r.email,
@@ -104,7 +104,8 @@ async function enviarUm(lote: Batch, r: Recipient) {
     texto,
     // permite rastrear a mensagem no log do servidor SMTP
     headers: { 'X-Gaulke-Codigo': r.codigo, 'X-Gaulke-Lote': String(lote.id) },
-    pedirRecibo: lote.pedirRecibo === 'true'
+    pedirRecibo: lote.pedirRecibo === 'true',
+    conta
   })
 }
 
@@ -114,9 +115,16 @@ async function processarLote(worker: Worker) {
   const batchId = worker.batchId
 
   try {
+    // A conta e resolvida UMA vez por execucao: decifrar a senha e abrir pool a
+    // cada destinatario seria desperdicio, e trocar de conta no meio de um lote
+    // so confundiria o relatorio.
+    let conta: ContaSmtp | null = null
+
     while (!worker.parar) {
       const lote = (await db.select().from(batches).where(eq(batches.id, batchId)))[0]
       if (!lote || lote.status !== 'enviando') break
+
+      if (!conta) conta = await resolverConta(lote.contaId)
 
       const r = await reivindicarProximo(batchId)
       if (!r) {
@@ -130,7 +138,7 @@ async function processarLote(worker: Worker) {
       }
 
       try {
-        const info = await enviarUm(lote, r)
+        const info = await enviarUm(lote, r, conta)
         await db
           .update(recipients)
           .set({

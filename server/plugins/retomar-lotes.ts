@@ -3,13 +3,15 @@ import { useDb, batches } from '../db'
 import { destravarOrfaos, iniciarLote } from '../utils/sender'
 import { checarBaseUrl, checarAlcancePublico } from '../utils/urls'
 import { garantirTemplatePadrao } from '../utils/seed'
+import { importarContaDoEnv } from '../utils/contas'
 import { iniciarAgendador } from '../utils/agendador'
 import { aplicarMigrations } from '../utils/migrations'
 
 /**
  * Boot da aplicacao, em qualquer ambiente:
  *  1. aplica as migrations pendentes (idempotentes, so tabelas sys_mail_*);
- *  2. cria o template padrao na primeira execucao;
+ *  2. cria o template padrao e importa a conta SMTP do .env, na primeira
+ *     execucao;
  *  3. retoma lotes que estavam enviando quando o processo caiu;
  *  4. liga o agendador, que avalia o que venceu durante a queda.
  */
@@ -36,6 +38,19 @@ export default defineNitroPlugin(async () => {
 
   try {
     await garantirTemplatePadrao()
+
+    // Traz a conta do .env para o banco na primeira execucao, para ninguem
+    // precisar recadastrar o que ja funcionava. Falha aqui nao pode derrubar o
+    // boot: sem chave de cifra, o sistema continua enviando pelo .env.
+    try {
+      const conta = await importarContaDoEnv()
+      if (conta) console.info(`[gaulke-mail] conta de envio importada do .env: ${conta.nome}`)
+    } catch (e) {
+      console.warn(
+        '[gaulke-mail] nao foi possivel importar a conta do .env:',
+        e instanceof Error ? e.message : e
+      )
+    }
 
     const destravados = await destravarOrfaos()
     if (destravados) {

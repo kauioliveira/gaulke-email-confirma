@@ -64,6 +64,7 @@ export const colunasRelatorio = {
   id: recipients.id,
   batchId: recipients.batchId,
   loteNome: batches.nome,
+  loteDisparadoPor: batches.disparadoPorNome,
   nome: recipients.nome,
   email: recipients.email,
   empresa: recipients.empresa,

@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
-import { useDb, batches, recipients, templates } from '../../../db'
+import { eq, and } from 'drizzle-orm'
+import { useDb, batches, recipients, templates, accounts } from '../../../db'
 import { novoToken, novoCodigo } from '../../../utils/ids'
 import { caminhoNoStorage } from '../../../utils/storage'
 import { stat } from 'node:fs/promises'
@@ -9,6 +9,8 @@ import { registrarEvento } from '../../../utils/tracking'
 const schema = z.object({
   nome: z.string().min(1).max(200),
   templateId: z.number().int().optional().nullable(),
+  // conta de envio; ausente usa a padrao das configuracoes
+  contaId: z.number().int().optional().nullable(),
   assunto: z.string().min(1).max(300),
   html: z.string().min(1),
   arquivoNome: z.string().optional().nullable(),
@@ -35,6 +37,7 @@ const schema = z.object({
 
 export default defineEventHandler(async event => {
   const dados = validar(schema, await readBody(event))
+  const operador = event.context.operador
   const db = useDb()
 
   // valida o arquivo antes de criar o lote, para nao disparar link quebrado
@@ -43,6 +46,33 @@ export default defineEventHandler(async event => {
     const info = await stat(caminho).catch(() => null)
     if (!info?.isFile()) {
       throw createError({ statusCode: 400, statusMessage: 'Arquivo do lote nao encontrado no servidor' })
+    }
+  }
+
+  /**
+   * A conta e resolvida na CRIACAO para o nome ficar gravado no lote, e para o
+   * erro aparecer agora — e nao no meio do disparo, com metade da lista ja
+   * enviada.
+   */
+  let contaId: number | null = null
+  let contaNome: string | null = null
+  if (dados.contaId) {
+    const [c] = await db.select().from(accounts).where(eq(accounts.id, dados.contaId))
+    if (!c) throw createError({ statusCode: 400, statusMessage: 'Conta de envio nao encontrada' })
+    if (c.ativa !== 'true') {
+      throw createError({ statusCode: 400, statusMessage: `A conta "${c.nome}" esta desativada` })
+    }
+    contaId = c.id
+    contaNome = c.nome
+  } else {
+    const [padrao] = await db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.padrao, 'true'), eq(accounts.ativa, 'true')))
+      .limit(1)
+    if (padrao) {
+      contaId = padrao.id
+      contaNome = padrao.nome
     }
   }
 
@@ -61,6 +91,12 @@ export default defineEventHandler(async event => {
       htmlSnapshot: dados.html,
       formato: dados.formato,
       blocos: (dados.blocos ?? null) as never,
+      // preenchido quando a pessoa entrou pela sessao do painel; com a senha
+      // do .env nao ha quem registrar, e fica nulo
+      criadoPorUserId: operador?.id ?? null,
+      criadoPorNome: operador?.nome ?? null,
+      contaId,
+      contaNome,
       arquivoPath: dados.arquivoNome ?? null,
       arquivoNome: dados.arquivoOriginal || dados.arquivoNome || null,
       intervaloMs: dados.intervaloMs,

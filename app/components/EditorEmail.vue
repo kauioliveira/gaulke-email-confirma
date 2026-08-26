@@ -228,7 +228,12 @@ async function converterParaHtml() {
         <span class="text-muted">Assunto:</span>
         <span class="font-medium">{{ preview.assunto || '—' }}</span>
       </div>
-      <div class="flex justify-center rounded-b-lg border border-t-0 border-default bg-white p-4 dark:bg-neutral-900">
+      <!--
+        Sempre claro, mesmo com o painel no tema escuro: o e-mail é enviado com
+        fundo claro, e mostrá-lo sobre uma moldura escura dá uma ideia errada
+        de como ele vai chegar.
+      -->
+      <div class="flex justify-center rounded-b-lg border border-t-0 border-default bg-white p-4">
         <iframe
           :srcdoc="preview.html"
           sandbox=""

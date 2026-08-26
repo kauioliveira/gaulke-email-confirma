@@ -471,6 +471,32 @@ const podeAvancar = computed(() => {
   return true
 })
 
+/**
+ * Contas de envio. A escolha fica gravada no lote: e ela que decide de qual
+ * caixa o e-mail sai, e o relatorio precisa poder dizer isso depois.
+ */
+const { data: contasData } = await useFetch<RespostaContas>(api('/api/admin/contas'), {
+  lazy: true,
+  server: false
+})
+// 0 = nenhuma conta escolhida. O USelect nao aceita null no v-model, e a
+// conversao para null acontece no envio.
+const contaId = ref<number>(0)
+const contasAtivas = computed(() => (contasData.value?.contas ?? []).filter(c => c.ativa))
+const itensConta = computed(() =>
+  contasAtivas.value.map(c => ({
+    label: c.padrao ? `${c.nome} (padrão)` : c.nome,
+    value: c.id
+  }))
+)
+// pré-seleciona a padrão assim que a lista chega, sem sobrescrever uma escolha
+// que a pessoa já tenha feito
+watch(contasAtivas, cs => {
+  if (!contaId.value) contaId.value = cs.find(c => c.padrao)?.id ?? cs[0]?.id ?? 0
+}, { immediate: true })
+
+const contaEscolhida = computed(() => contasAtivas.value.find(c => c.id === contaId.value) || null)
+
 async function criarLote() {
   criando.value = true
   try {
@@ -487,6 +513,7 @@ async function criarLote() {
         arquivoNome: arquivoNome.value || null,
         arquivoOriginal: arquivoOriginal.value || null,
         intervaloMs: intervaloSegundos.value * 1000,
+        contaId: contaId.value || null,
         exigirConfirmacao: exigirConfirmacao.value,
         pedirRecibo: pedirRecibo.value,
         agendadoPara: agendadoParaISO.value,
@@ -1048,6 +1075,31 @@ async function criarLote() {
             <USelect v-model="intervaloSegundos" :items="OPCOES_INTERVALO" class="w-full" />
           </UFormField>
         </div>
+
+        <!-- De qual conta sai o e-mail -->
+        <UFormField
+          label="Conta de envio"
+          :help="contaEscolhida
+            ? `Os e-mails sairão de ${contaEscolhida.remetente}.`
+            : 'Nenhuma conta cadastrada: será usada a configuração do .env.'"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <USelect
+              v-if="itensConta.length"
+              v-model="contaId"
+              :items="itensConta"
+              class="min-w-64"
+            />
+            <UButton
+              to="/admin/configuracoes"
+              :label="itensConta.length ? 'Gerenciar contas' : 'Cadastrar uma conta'"
+              icon="i-lucide-settings"
+              color="neutral"
+              variant="outline"
+              size="xs"
+            />
+          </div>
+        </UFormField>
 
         <div class="space-y-3">
           <UCheckbox

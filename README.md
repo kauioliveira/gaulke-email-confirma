@@ -117,8 +117,9 @@ Todas as variáveis ficam no `.env` (veja `.env.example`):
 | `DATABASE_URL` | Postgres. **Compartilhado com outros sistemas** — veja a seção de banco |
 | `NUXT_SMTP_*` | servidor de e-mail da empresa |
 | `URL_ACESSO` | **base pública de todos os links**: botão, pixel e logo |
-| `ADMIN_PASSWORD` | senha única da área `/admin` |
+| `ADMIN_PASSWORD` | senha da área `/admin` — **reserva**, usada só quando não há sessão do painel |
 | `SESSION_SECRET` | segredo do cookie de sessão (trocar derruba as sessões) |
+| `SMTP_CRYPTO_KEY` | cifra as senhas das contas de envio — sem ela não há cadastro de contas |
 | `STORAGE_DIR` | diretório privado dos PDFs (fora de `public/`, de propósito) |
 
 ## Publicação
@@ -132,9 +133,23 @@ tráfego para ele.
                               │
                     Nginx/Apache (proxy reverso)
                               │
-                      127.0.0.1:3000
-                    (processo Node/Nuxt)
+                      127.0.0.1:8551
+                 (container; APP_HOST_PORT, vindo
+                    de shell/deploy.conf)
+                              │
+                        :3000 dentro do
+                    container (fixo, Dockerfile)
 ```
+
+São três portas diferentes e vale não confundi-las:
+
+| Onde | Porta | Definida em |
+|---|---|---|
+| `npm run dev`, nesta máquina | **2005** | `PORT`, no `.env` |
+| No host de homologação/produção | **8551** | `HOMOLOG_PORT` / `PRODUCTION_PORT`, em [`shell/deploy.conf`](shell/deploy.conf) |
+| Dentro do container | 3000, fixa | `ENV PORT` do `Dockerfile` — não mexer |
+
+É a do meio que o vhost do Nginx consulta.
 
 ### Subdomínio (recomendado)
 
@@ -307,7 +322,7 @@ bash exec.sh migrate       # no servidor, contêiner descartável
 ```bash
 npm install
 npm run db:migrate     # cria as tabelas sys_mail_*
-npm run dev            # http://localhost:3000
+npm run dev            # http://localhost:2005 — a porta sai de PORT no .env
 npm run typecheck
 npm run build && node .output/server/index.mjs
 ```
@@ -322,6 +337,96 @@ npm run build && node .output/server/index.mjs
 - IP é dado pessoal: aparece só na área autenticada, nunca em página pública.
 - Retenção declarada ao titular: **24 meses**. O expurgo ainda é manual —
   veja "Pendências".
+
+## Contas de envio
+
+O SMTP saiu do `.env` e virou cadastro, em **Configurações**. O servidor
+costuma ser o mesmo para todo mundo — por isso ele já vem pré-preenchido — mas
+usuário e senha mudam por setor, e **cada lote escolhe de qual conta sai**.
+
+Na primeira execução a conta do `.env` é importada sozinha, já como padrão, e
+passa a ser editável pela tela. Ninguém precisa recadastrar o que já
+funcionava, e nada muda para quem não abrir a tela.
+
+### Só salva se conectar
+
+Criar ou editar uma conta **testa a conexão antes de gravar**. Falhou, nada é
+salvo. A trava existe nos dois lados: a tela bloqueia o botão até o teste
+passar, e o servidor repete a checagem — sem isso, uma conta salva por fora
+viraria uma fila de falhas no meio do próximo disparo.
+
+O efeito colateral é proposital: com o servidor SMTP fora do ar não dá para
+editar a conta, nem para trocar só o rótulo. Para esse caso existe **Desativar**,
+que não testa — justamente porque precisa funcionar quando nada responde.
+
+### A senha é cifrada, não tem hash
+
+Hash é de via única: serve para conferir uma senha digitada, nunca para
+recuperá-la. O SMTP exige a senha **em claro** na hora de autenticar, então o
+que cabe aqui é cifra reversível — **AES-256-GCM**
+([`server/utils/cripto.ts`](server/utils/cripto.ts)), que além de cifrar
+autentica: adulterar o texto cifrado faz a decifragem falhar em vez de devolver
+lixo.
+
+A chave fica em `SMTP_CRYPTO_KEY`, no `.env`:
+
+```bash
+openssl rand -hex 32
+```
+
+| Situação | Consequência |
+|---|---|
+| Chave ausente | não dá para cadastrar conta; os envios seguem pelo SMTP do `.env` |
+| Chave perdida | as senhas gravadas viram ilegíveis — basta recadastrar as contas |
+| Chave trocada | idem: o que já estava gravado deixa de abrir |
+| Mesmo banco, chaves diferentes | um ambiente não lê o que o outro gravou |
+
+Não há queda para `SESSION_SECRET` de propósito: rotacionar o segredo de sessão
+é rotina, e derrubaria todas as contas de e-mail junto — sem que o motivo
+aparecesse em lugar nenhum.
+
+A senha **nunca** sai numa resposta da API, nem cifrada.
+
+### O que fica registrado
+
+O lote grava `conta_id` **e** `conta_nome`. O nome é snapshot: se a conta for
+excluída depois, o relatório continua dizendo de qual caixa aquele e-mail saiu.
+Excluir uma conta com lote em andamento, pausado ou agendado é recusado — cortar
+as credenciais no meio de um disparo transformaria o resto da lista em erro.
+
+## Entrada pela sessão do painel
+
+Quem já está logado no painel (`gaulke-data-tools-ts`) **entra sem senha**, e o
+lote passa a registrar quem o criou e quem o disparou.
+
+Funciona porque o painel grava o cookie `gaulke_auth_session` com
+`Domain=contabilgaulke.com.br` — o navegador já o envia para este subdomínio
+sozinho — e o hash SHA-256 dele fica em `public.user_session`, no **mesmo
+banco** que este app usa. Então basta calcular o hash e procurar a linha viva
+([`server/utils/sessao-painel.ts`](server/utils/sessao-painel.ts)).
+
+| Situação | O que acontece |
+|---|---|
+| Sessão do painel, admin ou supervisor | entra sem senha, autoria registrada |
+| Sessão do painel, usuário comum | **403** — disparo é restrito (13 podem, 33 não) |
+| Sessão expirada ou inválida | mensagem específica, e a senha continua valendo |
+| Sem cookie (ex.: acesso por IP) | pede a senha do `.env`, como antes |
+
+**Validação pelo banco, não por segredo compartilhado.** Não precisamos do
+`authJwtSecret` do painel, e o logout tem efeito **imediato**: quando o painel
+apaga a linha da sessão, o acesso aqui morre junto. Um token assinado
+continuaria valendo até expirar.
+
+**Acoplamento assumido:** se o painel trocar o nome do cookie ou o algoritmo do
+hash, deixamos de reconhecer a sessão. O sistema não quebra — cai na senha — mas
+perderia a autoria em silêncio; por isso `/api/admin/sessao` devolve `origem`,
+distinguindo "sem cookie" de "cookie não reconhecido".
+
+> **Por que não liberar por IP interno.** `clientIp()` lê `X-Forwarded-For`, que
+> é enviado pelo cliente — foi assim que simulei o proxy do Gmail nos testes.
+> Dispensar a senha por IP deixaria qualquer um entrar mandando
+> `X-Forwarded-For: 192.168.0.10`. Mesmo blindado, "estar na rede" não é
+> "ser autorizado": o relatório tem e-mail e IP de cliente.
 
 ## Editor visual do e-mail
 

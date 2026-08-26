@@ -217,7 +217,9 @@ function progresso(l: any) {
             </div>
             <p class="mt-1 truncate text-sm text-muted">{{ l.assuntoSnapshot }}</p>
             <p class="mt-1 text-xs text-muted">
-              Criado em {{ dataHora(l.createdAt) }} · intervalo de {{ l.intervaloMs / 1000 }}s
+              Criado em {{ dataHora(l.createdAt) }}
+              <template v-if="l.criadoPorNome"> por {{ l.criadoPorNome }}</template>
+              · intervalo de {{ l.intervaloMs / 1000 }}s
               <template v-if="l.arquivoNome"> · {{ l.arquivoNome }}</template>
             </p>
             <p

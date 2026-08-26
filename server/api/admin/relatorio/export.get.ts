@@ -4,7 +4,7 @@ import { lerFiltros, montarWhere, colunasRelatorio, ultimoIp } from '../../../ut
 import { linkAcesso } from '../../../utils/urls'
 
 const CABECALHO = [
-  'Lote', 'Nome', 'E-mail', 'Empresa', 'Codigo', 'Status', 'Enviado em',
+  'Lote', 'Disparado por', 'Nome', 'E-mail', 'Empresa', 'Codigo', 'Status', 'Enviado em',
   'Provavel leitura em', 'Qtd aberturas', 'Ultima abertura', 'Primeira abertura (qualquer)',
   'Acessou em', 'Confirmou leitura em', 'Baixou em', 'Qtd downloads',
   'Ultimo IP', 'Ultimo erro', 'Link de acesso'
@@ -30,7 +30,7 @@ export default defineEventHandler(async event => {
 
   const corpo = linhas.map(l =>
     [
-      l.loteNome, l.nome, l.email, l.empresa, l.codigo, l.status, l.sentAt,
+      l.loteNome, l.loteDisparadoPor, l.nome, l.email, l.empresa, l.codigo, l.status, l.sentAt,
       l.firstHumanOpenAt, l.openCount, l.lastOpenAt, l.firstOpenAt,
       l.firstAccessAt, l.confirmedAt, l.firstDownloadAt, l.downloadCount,
       l.ultimoIp, l.ultimoErro, linkAcesso(l.token)

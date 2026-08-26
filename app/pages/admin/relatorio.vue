@@ -191,7 +191,13 @@ function pct(parte: number, total: number) {
                 <p v-if="l.empresa" class="truncate text-xs text-muted">{{ l.empresa }}</p>
               </td>
               <td class="px-3 py-2 font-mono text-xs">{{ l.codigo }}</td>
-              <td class="max-w-[140px] truncate px-3 py-2 text-xs text-muted">{{ l.loteNome }}</td>
+              <td class="max-w-[140px] truncate px-3 py-2 text-xs text-muted">
+                {{ l.loteNome }}
+                <!-- quem disparou fica junto do lote: e por lote, nao por pessoa -->
+                <span v-if="l.loteDisparadoPor" class="block truncate opacity-70">
+                  por {{ l.loteDisparadoPor }}
+                </span>
+              </td>
               <td class="px-3 py-2">
                 <UBadge :color="(CORES_STATUS[l.status] as any) || 'neutral'" variant="subtle" size="xs" :label="l.status" />
                 <UTooltip v-if="l.ultimoErro" :text="l.ultimoErro">

@@ -56,7 +56,7 @@ function renderizarBloco(b: Bloco): string {
     case 'logo':
       return `
             <tr>
-              <td align="${ALINHAR[b.alinhamento]}" style="background-color:#ffffff;border-bottom:3px solid ${MARCA};padding:24px;">
+              <td align="${ALINHAR[b.alinhamento]}" style="border-bottom:3px solid ${MARCA};padding:24px;">
                 <img src="{{logo}}" alt="Gaulke Contábil" width="180" style="display:block;border:0;max-width:180px;height:auto;" />
               </td>
             </tr>`
@@ -201,6 +201,18 @@ export function renderizarBlocos(blocos: Bloco[], preHeader = ''): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      A logo e um PNG transparente com tracos escuros (azul #323983 e #0b6dad).
+      Sem estas declaracoes, Gmail e Outlook no modo escuro escurecem os fundos
+      por conta propria — e como nao invertem a imagem, a logo desaparece, ou
+      sobra como um retangulo claro no meio do que ficou escuro. Declarar que o
+      e-mail e claro faz o cliente respeitar as cores como foram escritas.
+    -->
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
+    <style>
+      :root { color-scheme: light; supported-color-schemes: light; }
+    </style>
     <title>{{empresa}}</title>
   </head>
   <body style="margin:0;padding:0;background-color:${FUNDO};font-family:Arial,Helvetica,sans-serif;color:${TEXTO_FORTE};">
