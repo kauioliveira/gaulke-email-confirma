@@ -73,7 +73,7 @@ visível: trocar o filtro no meio da escolha não derruba ninguém da lista.
 
 | Rota | O que faz |
 |---|---|
-| `/admin/lotes` | lista de lotes com progresso |
+| `/admin/lotes` | lista com busca, filtro por status e período, e ordenação |
 | `/admin/lotes/novo` | assistente: lista → PDF → e-mail → revisão |
 | `/admin/lotes/:id` | console de disparo **em tempo real** (SSE), pausar/retomar/reenviar falhas |
 | `/admin/templates` | editor de HTML com preview visual e envio de teste |
@@ -122,6 +122,31 @@ Checklist:
 3. **Deploy** — `bash shell/build-image-production.sh` (veja abaixo)
 4. **Proxy reverso** — `deploy/nginx-notifica.conf` ou `deploy/apache-notifica.conf`
 5. **SSL** — `certbot --nginx -d notifica.contabilgaulke.com.br`
+
+### Portas e destinos: `shell/deploy.conf`
+
+Servidor, usuário, diretório e **porta** de cada ambiente ficam em
+[`shell/deploy.conf`](shell/deploy.conf) — não é preciso editar o script para
+trocar. A porta escolhida é gravada como `APP_HOST_PORT` no `.env.production`
+que viaja no pacote, **sobrescrevendo** o que estiver no arquivo: assim uma
+cópia vinda de outro servidor nunca leva a porta errada.
+
+É essa porta que o `docker-compose` abre **no loopback** do servidor, e é o
+endereço que o proxy reverso consulta — trocou aqui, troque no vhost.
+
+Para descobrir o que já está ocupado antes de escolher:
+
+```bash
+bash shell/build-image-production.sh   # opção 3
+```
+
+Lista as portas TCP em escuta e os contêineres publicando portas em cada
+servidor, e diz se a porta configurada está livre. Antes de enviar o pacote o
+script confere de novo e avisa se alguém ocupou — descobrir isso depois do
+rsync custa uma rodada inteira de deploy.
+
+A porta do ambiente **local** é `PORT` no `.env` (padrão 3000); ela não tem
+relação com as dos servidores.
 
 ### Deploy: build aqui, `docker load` lá
 
@@ -270,6 +295,74 @@ npm run build && node .output/server/index.mjs
 - IP é dado pessoal: aparece só na área autenticada, nunca em página pública.
 - Retenção declarada ao titular: **24 meses**. O expurgo ainda é manual —
   veja "Pendências".
+
+## Busca e ordenação dos lotes
+
+A lista filtra **no servidor** e é paginada (20 por página) — filtrar no cliente
+exigiria baixar todos os lotes a cada carregamento, e esse número só cresce.
+
+A busca cobre **nome, assunto e nome do arquivo**: quase sempre é por um desses
+que a pessoa lembra do lote, e não pelo nome dado na criação.
+
+Ordenações: mais recentes/antigos, último disparo, última conclusão, mais
+enviados, mais falhas, mais destinatários e nome. As de data usam
+`nulls last` — sem isso, ordenar por "último disparo" colocaria no topo
+justamente os lotes que **nunca** dispararam.
+
+Os atalhos de status (`agendado (5)`, `erro (3)`…) mostram a contagem real e só
+aparecem quando existe algo naquele status, para ninguém clicar num filtro que
+não traz nada.
+
+> Os combos de "filtrar por lote" do relatório e do assistente usam
+> `/api/admin/batches/opcoes`, uma lista enxuta e **não paginada**. Se
+> continuassem consumindo a listagem principal, passariam a mostrar só os lotes
+> da primeira página e os antigos sumiriam do filtro sem aviso.
+
+## Agendamento
+
+O lote pode nascer agendado (passo 4 do assistente) ou ser agendado depois. O
+[`server/utils/agendador.ts`](server/utils/agendador.ts) varre a cada 30s e
+dispara o que venceu, com posse atômica — duas instâncias nunca disparam o
+mesmo lote.
+
+**Se o sistema estiver fora do ar na hora marcada:** ele dispara ao voltar,
+desde que o atraso seja menor que a tolerância (padrão 120 min,
+`AGENDAMENTO_TOLERANCIA_MIN`). Passando disso o lote fica **pausado** com o
+motivo em `observacao`, visível na tela — um comunicado marcado para as 8h não
+deve sair sozinho às 15h sem ninguém acompanhando.
+
+O horário é escolhido no fuso do navegador e convertido para UTC antes de ir
+ao banco (`new Date(valor).toISOString()`): mandar a string crua do
+`datetime-local` faria 14h de Brasília virar 14h UTC.
+
+## Limite de requisições
+
+As quatro rotas públicas gravam um evento por acerto, e `sys_mail_events` é a
+trilha de auditoria — sem freio, um loop na URL do pixel infla a evidência.
+[`server/middleware/rate-limit.ts`](server/middleware/rate-limit.ts) concentra
+a política:
+
+| Rota | Limite | Chave |
+|---|---|---|
+| landing `/api/c/:token` | 60/min | IP + token |
+| confirmar | 10/min | IP + token |
+| arquivo | 20/min | IP + token |
+| pixel | 60/min | IP + token |
+| qualquer rota pública | 200/min | IP |
+| login | 5 **falhas** / 10 min | IP |
+
+Duas decisões que valem registro:
+
+- **A chave é IP + token.** Rede corporativa faz NAT: limitar só por IP
+  bloquearia uma empresa inteira quando o comunicado fosse aberto por todos ao
+  mesmo tempo. O freio global por IP cobre varredura de tokens.
+- **O pixel nunca devolve erro.** Um 429 renderizaria imagem quebrada dentro
+  do e-mail; excedido o limite ele entrega o PNG e apenas não registra.
+
+Os contadores são em memória (um limitador em Postgres gravaria uma linha por
+request, que é o que queremos evitar). Com mais de uma réplica cada uma tem seu
+contador, e um restart zera tudo — aceitável, já que o objetivo é barrar loop e
+força bruta, não cobrar quota. Ajustáveis por `RATE_LIMIT_*`.
 
 ## Pendências conhecidas
 

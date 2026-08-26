@@ -6,7 +6,13 @@
  * o tipo a partir da rota.
  */
 
-export type StatusLote = 'rascunho' | 'enviando' | 'pausado' | 'concluido' | 'erro'
+export type StatusLote =
+  | 'rascunho'
+  | 'agendado'
+  | 'enviando'
+  | 'pausado'
+  | 'concluido'
+  | 'erro'
 export type StatusDestinatario = 'pendente' | 'enviando' | 'enviado' | 'erro' | 'bounce'
 export type TipoEvento =
   | 'enfileirado' | 'enviado' | 'erro' | 'abertura'
@@ -39,6 +45,10 @@ export interface Lote {
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
+  agendadoPara: string | null
+  agendadoEm: string | null
+  /** motivo quando o proprio sistema mudou o status do lote */
+  observacao: string | null
   workerAtivo?: boolean
 }
 
@@ -111,7 +121,20 @@ export interface LinhaRelatorio extends Omit<Destinatario, 'dadosExtras'> {
 /* ---------- respostas dos endpoints ---------- */
 
 export interface RespostaTemplates { templates: Template[] }
-export interface RespostaLotes { lotes: Lote[] }
+
+export interface RespostaLotes {
+  lotes: Lote[]
+  total: number
+  pagina: number
+  porPagina: number
+  /** quantos lotes existem em cada status, ignorando os filtros da tela */
+  contagemPorStatus: Record<string, number>
+}
+
+/** Lista enxuta para combos — nao e paginada. */
+export interface RespostaLotesOpcoes {
+  lotes: { id: number; nome: string; status: StatusLote }[]
+}
 export interface RespostaLote { lote: Lote; contagem: ContagemLote }
 export interface RespostaDestinatarios {
   destinatarios: Destinatario[]

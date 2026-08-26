@@ -63,7 +63,12 @@ onUnmounted(() => { es?.close(); es = null })
 // a lista completa e recarregada devagar; o log ao vivo cobre o imediato
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
-  timer = setInterval(() => { if (data.value?.lote.status === 'enviando') refreshDest() }, 15000)
+  timer = setInterval(() => {
+    const st = data.value?.lote.status
+    if (st === 'enviando') refreshDest()
+    // agendado: precisa perceber sozinho quando o horario chegar
+    else if (st === 'agendado') refresh()
+  }, 15000)
 })
 onUnmounted(() => clearInterval(timer))
 
@@ -94,6 +99,25 @@ async function salvarIntervalo() {
   })
   toast.add({ title: `Intervalo ajustado para ${intervaloSegundos.value}s`, color: 'success' })
   refresh()
+}
+
+const agendado = computed(() => data.value?.lote.status === 'agendado')
+const cancelando = ref(false)
+
+async function cancelarAgendamento() {
+  cancelando.value = true
+  try {
+    await $fetch(api(`/api/admin/batches/${id}/agendar`), {
+      method: 'POST',
+      body: { agendadoPara: null }
+    })
+    toast.add({ title: 'Agendamento cancelado', color: 'success' })
+    await refresh()
+  } catch (e: any) {
+    toast.add({ title: 'Não foi possível cancelar', description: e?.statusMessage, color: 'error' })
+  } finally {
+    cancelando.value = false
+  }
 }
 
 const progresso = computed(() => {
@@ -128,12 +152,26 @@ const CORES_LOG: Record<string, string> = {
           Criado em {{ dataHora(data.lote.createdAt) }}
           <template v-if="data.lote.arquivoNome"> · {{ data.lote.arquivoNome }}</template>
         </p>
+        <p v-if="data.lote.agendadoPara" class="mt-1 flex items-center gap-1.5 text-xs" :class="agendado ? 'text-info' : 'text-muted'">
+          <UIcon name="i-lucide-calendar-clock" class="size-3.5" />
+          {{ agendado ? 'Disparo agendado para' : 'Estava agendado para' }}
+          {{ dataHora(data.lote.agendadoPara) }}
+        </p>
       </div>
 
       <div class="flex flex-wrap gap-2">
         <UButton
+          v-if="agendado"
+          label="Cancelar agendamento"
+          icon="i-lucide-calendar-x"
+          color="neutral"
+          variant="outline"
+          :loading="cancelando"
+          @click="cancelarAgendamento"
+        />
+        <UButton
           v-if="!rodando"
-          label="Iniciar disparo"
+          :label="agendado ? 'Disparar agora' : 'Iniciar disparo'"
           icon="i-lucide-play"
           :loading="agindo"
           :disabled="data.lote.status === 'concluido' && !data.contagem.pendentes"
@@ -165,6 +203,20 @@ const CORES_LOG: Record<string, string> = {
         />
       </div>
     </div>
+
+    <!--
+      Quando o proprio sistema muda o status (agendamento vencido durante uma
+      queda, por exemplo), o motivo precisa aparecer — senao o operador so ve
+      um lote pausado sem explicacao.
+    -->
+    <UAlert
+      v-if="data.lote.observacao"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-calendar-x"
+      title="Este lote foi pausado pelo sistema"
+      :description="data.lote.observacao"
+    />
 
     <!-- Progresso -->
     <UCard>

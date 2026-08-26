@@ -47,9 +47,17 @@ export const batches = pgTable(
     falhas: integer('falhas').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     startedAt: timestamp('started_at', { withTimezone: true }),
-    finishedAt: timestamp('finished_at', { withTimezone: true })
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    // disparo agendado
+    agendadoPara: timestamp('agendado_para', { withTimezone: true }),
+    agendadoEm: timestamp('agendado_em', { withTimezone: true }),
+    // motivo quando o proprio sistema muda o status (ex.: agendamento vencido)
+    observacao: text('observacao')
   },
-  t => [index('sys_mail_batches_status_idx').on(t.status)]
+  t => [
+    index('sys_mail_batches_status_idx').on(t.status),
+    index('sys_mail_batches_agendado_idx').on(t.agendadoPara)
+  ]
 )
 
 export const recipients = pgTable(

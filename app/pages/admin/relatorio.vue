@@ -38,7 +38,8 @@ const consulta = computed(() => ({
   porPagina: filtros.porPagina
 }))
 
-const { data: lotesData } = await useFetch<RespostaLotes>(api('/api/admin/batches'))
+// combo usa a lista enxuta: a principal e paginada e cortaria os lotes antigos
+const { data: lotesData } = await useFetch<RespostaLotesOpcoes>(api('/api/admin/batches/opcoes'))
 const { data, refresh, status: carregando } = await useFetch<RespostaRelatorio>(api('/api/admin/relatorio'), {
   query: consulta,
   watch: [consulta]

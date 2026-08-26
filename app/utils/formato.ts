@@ -34,6 +34,7 @@ export const CORES_STATUS: Record<string, string> = {
   erro: 'error',
   bounce: 'warning',
   rascunho: 'neutral',
+  agendado: 'info',
   pausado: 'warning',
   concluido: 'success'
 }

@@ -21,23 +21,29 @@ IMAGE_NAME="${APP_NAME}:latest"
 TAR_NAME="${APP_NAME}__NEW.tar"
 
 # ============================================================
-# HOMOLOGAÇÃO
+# DESTINOS E PORTAS
 # ============================================================
+# Ficam em shell/deploy.conf para nao ser preciso editar este script quando
+# mudar a porta ou o servidor. Os valores abaixo sao apenas o fallback de
+# quem clonar o repositorio sem o arquivo.
 HOMOLOG_USER="root"
 HOMOLOG_HOST="192.168.0.10"
 HOMOLOG_DIR="/homologa/${APP_NAME}"
-HOMOLOG_EXPORT_DIR="dist-docker-homolog"
+HOMOLOG_PORT="8551"
 
-# ============================================================
-# PRODUÇÃO
-# ============================================================
 PRODUCTION_USER="gaulke"
 PRODUCTION_HOST="192.168.0.204"
 PRODUCTION_DIR="/home/gaulke/${APP_NAME}-main"
-PRODUCTION_EXPORT_DIR="dist-docker-production"
+PRODUCTION_PORT="8551"
 
-TEMP_ENV_BACKUP=""
-TEMP_ENV_EXISTED="false"
+DEPLOY_CONF="${SCRIPT_DIR}/deploy.conf"
+if [[ -f "$DEPLOY_CONF" ]]; then
+    # shellcheck source=/dev/null
+    source "$DEPLOY_CONF"
+fi
+
+HOMOLOG_EXPORT_DIR="dist-docker-homolog"
+PRODUCTION_EXPORT_DIR="dist-docker-production"
 
 # Quando o envio e recusado, o pacote fica no disco para ser mandado a mao.
 # Sem esta marca o `rm -rf dist-docker*` do fim apagaria justamente o que a
@@ -84,35 +90,6 @@ show_banner() {
     echo "#                                                              #"
     echo "################################################################"
     echo
-}
-
-backup_current_production_env() {
-    TEMP_ENV_EXISTED="false"
-    TEMP_ENV_BACKUP=""
-
-    if [[ -f .env.production ]]; then
-        TEMP_ENV_BACKUP="$(mktemp)"
-        cp -p .env.production "$TEMP_ENV_BACKUP"
-        TEMP_ENV_EXISTED="true"
-    fi
-}
-
-restore_production_env() {
-    if [[ "$TEMP_ENV_EXISTED" == "true" && -n "$TEMP_ENV_BACKUP" && -f "$TEMP_ENV_BACKUP" ]]; then
-        mv -f "$TEMP_ENV_BACKUP" .env.production
-        echo "==> .env.production original restaurado"
-    elif [[ "$TEMP_ENV_EXISTED" == "false" ]]; then
-        rm -f .env.production
-
-        if [[ -n "$TEMP_ENV_BACKUP" && -f "$TEMP_ENV_BACKUP" ]]; then
-            rm -f "$TEMP_ENV_BACKUP"
-        fi
-
-        echo "==> .env.production temporário removido"
-    fi
-
-    TEMP_ENV_BACKUP=""
-    TEMP_ENV_EXISTED="false"
 }
 
 # ============================================================
@@ -200,40 +177,95 @@ validate_secrets() {
     fi
 }
 
+# Gera o ambiente de homologação num arquivo TEMPORÁRIO e ecoa o caminho.
+#
+# Antes isto escrevia por cima do .env.production do repositório e restaurava
+# depois com um trap. Bastava o script morrer na hora errada — ou alguém mexer
+# no arquivo no meio — para o arquivo de produção ser perdido. Nada aqui toca
+# mais no .env.production real.
 prepare_homolog_env() {
     require_file ".env"
 
-    backup_current_production_env
-
-    echo "==> Criando .env.production temporário a partir do .env"
-    cp .env .env.production
+    local arquivo
+    arquivo="$(mktemp)"
+    chmod 600 "$arquivo"
+    cp .env "$arquivo"
 
     # O .env de desenvolvimento aponta para a máquina do dev. Copiado como está,
     # homologação mandaria e-mails com links para uma estação de trabalho — e o
     # erro só apareceria quando alguém clicasse no botão do e-mail.
-    local porta
-    porta="$(grep -E '^APP_HOST_PORT=' .env.production | head -1 | cut -d= -f2- | tr -d '[:space:]')"
-    porta="${porta:-8551}"
+    #
+    # A porta vem de shell/deploy.conf, e não do .env: é a porta do SERVIDOR de
+    # homologação, que nada tem a ver com a que o dev usa na própria máquina.
+    local url="http://${HOMOLOG_HOST}:${HOMOLOG_PORT}"
 
-    local url="http://${HOMOLOG_HOST}:${porta}"
-
-    echo "==> Apontando URL_ACESSO para ${url}"
-    if grep -q "^URL_ACESSO=" .env.production; then
-        sed -i "s|^URL_ACESSO=.*|URL_ACESSO=${url}|" .env.production
+    if grep -q "^URL_ACESSO=" "$arquivo"; then
+        sed -i "s|^URL_ACESSO=.*|URL_ACESSO=${url}|" "$arquivo"
     else
-        printf '\nURL_ACESSO=%s\n' "$url" >> .env.production
+        printf '\nURL_ACESSO=%s\n' "$url" >> "$arquivo"
     fi
 
-    if ! grep -q "^APP_HOST_PORT=" .env.production; then
-        printf '\nAPP_HOST_PORT=%s\n' "$porta" >> .env.production
+    # o caminho volta pelo stdout; os avisos vao para o stderr para não sujá-lo
+    echo "==> Apontando URL_ACESSO para ${url}" >&2
+    printf '%s' "$arquivo"
+}
+
+# A porta do AMBIENTE sempre vence o que estiver escrito no .env.production.
+# Sem isso, um arquivo copiado de outro servidor levaria a porta errada e o
+# proxy reverso bateria num lugar onde nao ha nada escutando.
+aplicar_porta() {
+    local arquivo="$1"
+    local porta="$2"
+
+    if grep -q "^APP_HOST_PORT=" "$arquivo"; then
+        sed -i "s|^APP_HOST_PORT=.*|APP_HOST_PORT=${porta}|" "$arquivo"
+    else
+        printf '\nAPP_HOST_PORT=%s\n' "$porta" >> "$arquivo"
     fi
 
-    chmod 600 .env.production
+    echo "==> Porta publicada no host: ${porta}"
+}
+
+# Avisa se a porta ja esta ocupada no servidor ANTES de mandar o pacote —
+# descobrir isso depois do rsync custa uma rodada inteira de deploy.
+conferir_porta_livre() {
+    local remote="$1"
+    local porta="$2"
+    local environment_label="$3"
+
+    local em_uso
+    em_uso="$(ssh -o ConnectTimeout=8 "$remote" \
+        "ss -ltn 2>/dev/null | grep -E '[:.]${porta}[[:space:]]' || true" 2>/dev/null || true)"
+
+    if [[ -z "$em_uso" ]]; then
+        echo "==> Porta ${porta} livre em ${environment_label}"
+        return 0
+    fi
+
+    # O proprio app, ja rodando, ocupa a porta — isso e esperado num redeploy.
+    local nosso
+    nosso="$(ssh -o ConnectTimeout=8 "$remote" \
+        "docker ps --filter name=${APP_NAME} --format '{{.Ports}}' 2>/dev/null | grep -c ':${porta}->' || true" 2>/dev/null || echo 0)"
+    nosso="$(printf '%s' "$nosso" | tr -d '[:space:]')"
+
+    if [[ "${nosso:-0}" != "0" ]]; then
+        echo "==> Porta ${porta} esta com o proprio ${APP_NAME} (redeploy normal)"
+        return 0
+    fi
+
+    echo
+    echo "ATENÇÃO: a porta ${porta} ja esta em uso em ${environment_label} por outro processo:"
+    printf '%s\n' "$em_uso" | sed 's/^/           /'
+    echo "         Ajuste a porta em shell/deploy.conf (opcao 3 lista o que esta ocupado)."
+    echo
+
+    confirm "Continuar mesmo assim"
 }
 
 prepare_package() {
     local export_dir="$1"
     local environment_label="$2"
+    local env_file="$3"
 
     echo "==> Preparando pacote de ${environment_label}"
     rm -rf "$export_dir"
@@ -243,7 +275,7 @@ prepare_package() {
 
     cp docker-compose.yml "$export_dir/"
     cp "$EXEC_SCRIPT" "$export_dir/"
-    cp .env.production "$export_dir/"
+    cp "$env_file" "${export_dir}/.env.production"
     chmod 600 "${export_dir}/.env.production"
 }
 
@@ -253,6 +285,8 @@ deploy_environment() {
     local remote_host="$3"
     local remote_dir="$4"
     local export_dir="$5"
+    local porta="$6"
+    local env_file="$7"
 
     local remote="${remote_user}@${remote_host}"
 
@@ -260,10 +294,12 @@ deploy_environment() {
 
     require_file "docker-compose.yml"
     require_file "$EXEC_SCRIPT"
-    require_file ".env.production"
+    require_file "$env_file"
 
-    validate_url_acesso ".env.production" "$environment_label"
-    validate_secrets ".env.production" "$environment_label"
+    # LEITURA APENAS: o arquivo de origem nunca é modificado. A porta é
+    # aplicada mais adiante, na CÓPIA que vai dentro do pacote.
+    validate_url_acesso "$env_file" "$environment_label"
+    validate_secrets "$env_file" "$environment_label"
 
     echo "==> Limpando artefatos locais anteriores"
     rm -rf .output dist
@@ -275,7 +311,8 @@ deploy_environment() {
     echo "==> Buildando imagem Docker para ${environment_label}: ${IMAGE_NAME}"
     docker build -t "$IMAGE_NAME" .
 
-    prepare_package "$export_dir" "$environment_label"
+    prepare_package "$export_dir" "$environment_label" "$env_file"
+    aplicar_porta "${export_dir}/.env.production" "$porta"
 
     echo
     echo "Build de ${environment_label} concluído."
@@ -298,6 +335,11 @@ deploy_environment() {
 
     # A pasta pode não existir no primeiro deploy: o rsync falharia com
     # "No such file or directory" depois de já ter compactado o pacote.
+    conferir_porta_livre "$remote" "$porta" "$environment_label" || {
+        echo "Deploy cancelado."
+        return
+    }
+
     ssh "$remote" "mkdir -p '$remote_dir'"
 
     show_banner "ENVIANDO PARA ${environment_label}" "$remote_host" "$remote_dir"
@@ -331,22 +373,27 @@ deploy_environment() {
 build_homolog() {
     show_banner "HOMOLOGAÇÃO" "$HOMOLOG_HOST" "$HOMOLOG_DIR"
     echo "Usuário remoto:       ${HOMOLOG_USER}"
-    echo "Origem do ambiente:   .env"
-    echo "Arquivo enviado:      .env.production"
-    echo "URL_ACESSO vira:      http://${HOMOLOG_HOST}:<APP_HOST_PORT>"
+    echo "Origem do ambiente:   .env (cópia temporária, o arquivo não é alterado)"
+    echo "Arquivo enviado:      .env.production (gerado no pacote)"
+    echo "URL_ACESSO vira:      http://${HOMOLOG_HOST}:${HOMOLOG_PORT}"
     echo
 
-    trap restore_production_env EXIT INT TERM
-    prepare_homolog_env
+    local env_homolog
+    env_homolog="$(prepare_homolog_env)"
+
+    # o temporário some ao fim, dê certo ou não
+    trap 'rm -f "$env_homolog"' EXIT INT TERM
 
     deploy_environment \
         "HOMOLOGAÇÃO" \
         "$HOMOLOG_USER" \
         "$HOMOLOG_HOST" \
         "$HOMOLOG_DIR" \
-        "$HOMOLOG_EXPORT_DIR"
+        "$HOMOLOG_EXPORT_DIR" \
+        "$HOMOLOG_PORT" \
+        "$env_homolog"
 
-    restore_production_env
+    rm -f "$env_homolog"
     trap - EXIT INT TERM
 }
 
@@ -367,7 +414,54 @@ build_production() {
         "$PRODUCTION_USER" \
         "$PRODUCTION_HOST" \
         "$PRODUCTION_DIR" \
-        "$PRODUCTION_EXPORT_DIR"
+        "$PRODUCTION_EXPORT_DIR" \
+        "$PRODUCTION_PORT" \
+        ".env.production"
+}
+
+# Mostra o que ja escuta em cada servidor, para escolher uma porta livre sem
+# precisar abrir um SSH a parte.
+listar_portas() {
+    require_command "ssh"
+
+    for destino in \
+        "HOMOLOGAÇÃO|${HOMOLOG_USER}@${HOMOLOG_HOST}|${HOMOLOG_PORT}" \
+        "PRODUÇÃO|${PRODUCTION_USER}@${PRODUCTION_HOST}|${PRODUCTION_PORT}"
+    do
+        local rotulo="${destino%%|*}"
+        local resto="${destino#*|}"
+        local remote="${resto%%|*}"
+        local porta="${resto##*|}"
+
+        show_banner "PORTAS — ${rotulo}" "${remote#*@}" "porta configurada: ${porta}"
+
+        if ! ssh -o ConnectTimeout=8 "$remote" "true" 2>/dev/null; then
+            echo "  Não foi possível conectar em ${remote}."
+            continue
+        fi
+
+        echo "  Portas TCP em escuta:"
+        ssh -o ConnectTimeout=8 "$remote" \
+            "ss -ltnH 2>/dev/null | awk '{print \$4}' | sed 's/.*[:.]//' | sort -n -u | tr '\n' ' '" \
+            2>/dev/null | sed 's/^/    /'
+        echo
+
+        echo "  Containers Docker publicando portas:"
+        ssh -o ConnectTimeout=8 "$remote" \
+            "docker ps --format '{{.Names}}  {{.Ports}}' 2>/dev/null || echo '(docker indisponivel)'" \
+            2>/dev/null | sed 's/^/    /'
+        echo
+
+        if ssh -o ConnectTimeout=8 "$remote" \
+            "ss -ltn 2>/dev/null | grep -qE '[:.]${porta}[[:space:]]'" 2>/dev/null; then
+            echo "  >> A porta ${porta} JA ESTA EM USO neste servidor."
+        else
+            echo "  >> A porta ${porta} esta livre."
+        fi
+        echo
+    done
+
+    echo "Para trocar, edite shell/deploy.conf."
 }
 
 main() {
@@ -384,9 +478,15 @@ main() {
     echo
     echo "  1) HOMOLOGAÇÃO"
     echo "     ${HOMOLOG_USER}@${HOMOLOG_HOST}:${HOMOLOG_DIR}"
+    echo "     porta ${HOMOLOG_PORT}"
     echo
     echo "  2) PRODUÇÃO"
     echo "     ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_DIR}"
+    echo "     porta ${PRODUCTION_PORT}"
+    echo
+    echo "  Portas e destinos ficam em shell/deploy.conf"
+    echo
+    echo "  3) Conferir portas em uso nos servidores"
     echo
     echo "  0) Sair"
     echo
@@ -399,6 +499,9 @@ main() {
             ;;
         2)
             build_production
+            ;;
+        3)
+            listar_portas
             ;;
         0)
             echo "Operação cancelada."

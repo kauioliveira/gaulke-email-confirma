@@ -16,6 +16,8 @@ const schema = z.object({
   intervaloMs: z.number().int().min(1000).max(600000).default(10000),
   exigirConfirmacao: z.boolean().default(true),
   pedirRecibo: z.boolean().default(false),
+  // ISO 8601 com fuso; presente = o lote ja nasce agendado
+  agendadoPara: z.string().datetime({ offset: true }).nullish(),
   destinatarios: z
     .array(
       z.object({
@@ -59,7 +61,9 @@ export default defineEventHandler(async event => {
       intervaloMs: dados.intervaloMs,
       exigirConfirmacao: dados.exigirConfirmacao ? 'true' : 'false',
       pedirRecibo: dados.pedirRecibo ? 'true' : 'false',
-      status: 'rascunho',
+      status: dados.agendadoPara ? 'agendado' : 'rascunho',
+      agendadoPara: dados.agendadoPara ? new Date(dados.agendadoPara) : null,
+      agendadoEm: dados.agendadoPara ? new Date() : null,
       total: dados.destinatarios.length
     })
     .returning()

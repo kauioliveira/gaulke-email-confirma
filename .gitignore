@@ -13,3 +13,4 @@ deploy
 # pacotes gerados pelo shell/build-image-production.sh
 dist-docker*
 *.tar
+storage

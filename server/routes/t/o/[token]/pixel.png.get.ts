@@ -34,6 +34,13 @@ export default defineEventHandler(async event => {
   const token = getRouterParam(event, 'token') || ''
   if (!token) return responder()
 
+  /**
+   * Limite de requisicoes estourado (server/middleware/rate-limit.ts).
+   * Devolvemos a imagem normalmente e apenas nao registramos: um 429 aqui
+   * renderizaria imagem quebrada dentro do e-mail do destinatario.
+   */
+  if (event.context.pularRegistro) return responder()
+
   try {
     const r = (
       await useDb()

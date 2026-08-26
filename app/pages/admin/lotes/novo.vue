@@ -137,8 +137,9 @@ function alternarTodos() {
   escolhidos.value = adicionados
 }
 
-// lotes anteriores, só para filtrar a origem dos contatos
-const { data: lotesData } = await useFetch<RespostaLotes>(api('/api/admin/batches'), {
+// lotes anteriores, só para filtrar a origem dos contatos.
+// Lista enxuta: a principal é paginada e cortaria os lotes antigos do combo.
+const { data: lotesData } = await useFetch<RespostaLotesOpcoes>(api('/api/admin/batches/opcoes'), {
   lazy: true,
   server: false
 })
@@ -299,6 +300,41 @@ const exigirConfirmacao = ref(true)
 const pedirRecibo = ref(false)
 const criando = ref(false)
 
+/* ---------- agendamento ---------- */
+const quandoDisparar = ref<'depois' | 'agendar'>('depois')
+const dataAgendada = ref('')
+
+/** Sugere daqui a 1h, arredondado — evita cair numa data invalida. */
+function sugerirHorario() {
+  const d = new Date(Date.now() + 60 * 60 * 1000)
+  d.setMinutes(0, 0, 0)
+  // datetime-local espera "YYYY-MM-DDTHH:mm" em hora LOCAL, sem fuso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+watch(quandoDisparar, v => {
+  if (v === 'agendar' && !dataAgendada.value) dataAgendada.value = sugerirHorario()
+})
+
+/**
+ * O input datetime-local devolve hora LOCAL sem fuso ("2026-08-27T08:00").
+ * `new Date(...)` interpreta no fuso do navegador e o toISOString converte
+ * para UTC, que e o que o banco guarda. Mandar a string crua faria 8h de
+ * Brasilia virar 8h UTC — o comunicado sairia 3h antes.
+ */
+const agendadoParaISO = computed(() => {
+  if (quandoDisparar.value !== 'agendar' || !dataAgendada.value) return null
+  const d = new Date(dataAgendada.value)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+})
+
+const agendamentoValido = computed(() => {
+  if (quandoDisparar.value !== 'agendar') return true
+  const iso = agendadoParaISO.value
+  return !!iso && new Date(iso).getTime() > Date.now()
+})
+
 const OPCOES_INTERVALO = [
   { label: '5 segundos', value: 5 },
   { label: '10 segundos (recomendado)', value: 10 },
@@ -332,10 +368,16 @@ async function criarLote() {
         intervaloMs: intervaloSegundos.value * 1000,
         exigirConfirmacao: exigirConfirmacao.value,
         pedirRecibo: pedirRecibo.value,
+        agendadoPara: agendadoParaISO.value,
         destinatarios: listaProcessada.value.validos
       }
     })
-    toast.add({ title: `Lote criado com ${r.destinatarios} destinatários`, color: 'success' })
+    toast.add({
+      title: agendadoParaISO.value
+        ? `Lote agendado para ${new Date(agendadoParaISO.value).toLocaleString('pt-BR')}`
+        : `Lote criado com ${r.destinatarios} destinatários`,
+      color: 'success'
+    })
     await navigateTo(`/admin/lotes/${r.lote.id}`)
   } catch (e: any) {
     toast.add({ title: 'Erro ao criar o lote', description: e?.statusMessage, color: 'error' })
@@ -757,7 +799,64 @@ async function criarLote() {
           </div>
         </div>
 
+        <USeparator />
+
+        <!-- Quando disparar -->
+        <div class="space-y-3">
+          <p class="text-sm font-medium">Quando disparar</p>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <button
+              class="flex items-start gap-3 rounded-lg border p-3 text-left transition"
+              :class="quandoDisparar === 'depois' ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
+              @click="quandoDisparar = 'depois'"
+            >
+              <UIcon name="i-lucide-hand" class="mt-0.5 size-5 shrink-0" :class="quandoDisparar === 'depois' ? 'text-primary' : 'text-muted'" />
+              <div>
+                <p class="text-sm font-medium">Deixar como rascunho</p>
+                <p class="text-xs text-muted">Você inicia o disparo na tela seguinte, quando quiser.</p>
+              </div>
+            </button>
+
+            <button
+              class="flex items-start gap-3 rounded-lg border p-3 text-left transition"
+              :class="quandoDisparar === 'agendar' ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
+              @click="quandoDisparar = 'agendar'"
+            >
+              <UIcon name="i-lucide-calendar-clock" class="mt-0.5 size-5 shrink-0" :class="quandoDisparar === 'agendar' ? 'text-primary' : 'text-muted'" />
+              <div>
+                <p class="text-sm font-medium">Agendar</p>
+                <p class="text-xs text-muted">O sistema dispara sozinho na data e hora marcadas.</p>
+              </div>
+            </button>
+          </div>
+
+          <template v-if="quandoDisparar === 'agendar'">
+            <UFormField label="Data e hora" help="No seu fuso horário.">
+              <UInput v-model="dataAgendada" type="datetime-local" class="w-full sm:w-72" />
+            </UFormField>
+
+            <UAlert
+              v-if="!agendamentoValido"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              title="Escolha uma data futura"
+              description="O horário informado já passou."
+            />
+            <UAlert
+              v-else
+              color="info"
+              variant="subtle"
+              icon="i-lucide-calendar-check"
+              :title="`Disparo em ${new Date(agendadoParaISO!).toLocaleString('pt-BR')}`"
+              description="Se o sistema estiver fora do ar na hora marcada, ele dispara ao voltar — desde que o atraso seja pequeno. Passando disso, o lote fica pausado esperando você confirmar."
+            />
+          </template>
+        </div>
+
         <UAlert
+          v-if="quandoDisparar === 'depois'"
           color="neutral"
           variant="subtle"
           icon="i-lucide-shield-check"
@@ -786,10 +885,10 @@ async function criarLote() {
       />
       <UButton
         v-else
-        label="Criar lote"
-        icon="i-lucide-rocket"
+        :label="quandoDisparar === 'agendar' ? 'Agendar lote' : 'Criar lote'"
+        :icon="quandoDisparar === 'agendar' ? 'i-lucide-calendar-clock' : 'i-lucide-rocket'"
         :loading="criando"
-        :disabled="!listaProcessada.validos.length"
+        :disabled="!listaProcessada.validos.length || !agendamentoValido"
         @click="criarLote"
       />
     </div>
