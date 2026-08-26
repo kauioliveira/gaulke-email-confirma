@@ -9,13 +9,23 @@ services:
 
     # A porta do host vem do .env.production e depende do --env-file no
     # comando do compose: o `env_file:` abaixo alimenta o AMBIENTE DO
-    # CONTEINER, nao a interpolacao de ${...} aqui. Sem a flag, o valor
-    # viria vazio e cairia no padrao — abrindo uma porta diferente da que
-    # o proxy reverso consulta.
+    # CONTEINER, nao a interpolacao de ${...} aqui.
     #
-    # So no loopback: quem fala com a internet e o Nginx/Apache.
+    # Sem valor o compose FALHA, de proposito. Antes havia um padrao (8551) que
+    # abria silenciosamente uma porta diferente da que o proxy consulta — o
+    # container subia saudavel e o site nao respondia, sem nada no log.
+    #
+    # BIND EM TODAS AS INTERFACES, e nao so no loopback.
+    # O Nginx Proxy Manager roda em CONTAINER, em outra rede Docker. O
+    # `127.0.0.1` do host nao existe para ele, e as redes bridge sao isoladas
+    # entre si — nem por IP nem por nome ele chegava aqui. E o mesmo desenho dos
+    # outros sistemas da casa (jornal, apuracao, contrato), que publicam em
+    # 0.0.0.0 e sao consultados pelo NPM como 192.168.0.204:<porta>.
+    #
+    # A porta fica visivel na rede interna. Quem fecha isso e o firewall do
+    # servidor, nao o bind — e o proprio app exige senha ou sessao do painel.
     ports:
-      - '127.0.0.1:${APP_HOST_PORT:-8551}:3000'
+      - '${APP_HOST_PORT:?defina APP_HOST_PORT no .env.production (o build-image-production.sh grava a partir de shell/deploy.conf)}:3000'
 
     env_file:
       - .env.production

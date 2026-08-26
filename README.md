@@ -151,6 +151,32 @@ São três portas diferentes e vale não confundi-las:
 
 É a do meio que o vhost do Nginx consulta.
 
+### Nginx Proxy Manager
+
+O NPM roda **em container**, numa rede Docker própria (`proxy-gaulke_default`).
+Isso decide como o app precisa publicar a porta:
+
+| Para o NPM, `127.0.0.1` é… | …ele mesmo, não o servidor |
+|---|---|
+| Redes bridge diferentes | isoladas: nem por IP (`172.30.0.2`) nem por nome |
+
+Por isso o app publica em **todas as interfaces**, e não só no loopback — é o
+mesmo desenho dos outros sistemas da casa. No NPM, o destino é o **IP do
+servidor com a porta publicada**, nunca a porta interna:
+
+| Campo do NPM | Valor |
+|---|---|
+| Forward Hostname / IP | `192.168.0.204` |
+| Forward Port | o `PRODUCTION_PORT` de [`shell/deploy.conf`](shell/deploy.conf) |
+
+> **A porta interna do container é 3000**, e ela não vai no NPM. Em sistemas
+> PHP/nginx a interna é 80; aqui é um processo Node. O que o NPM consulta é
+> sempre a porta **publicada** no host (`0.0.0.0:<porta>->3000`), do mesmo jeito
+> que os outros sistemas são consultados pelas portas 2002, 2003 e 2004.
+
+Um bind só em loopback faz o container subir **saudável** e o site não
+responder — sem erro em lugar nenhum.
+
 ### Subdomínio (recomendado)
 
 Rodando em `notifica.contabilgaulke.com.br` o app fica na raiz do próprio

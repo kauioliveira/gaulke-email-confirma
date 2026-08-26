@@ -21,26 +21,38 @@ IMAGE_NAME="${APP_NAME}:latest"
 TAR_NAME="${APP_NAME}__NEW.tar"
 
 # ============================================================
-# DESTINOS E PORTAS
+# DESTINOS E PORTAS — FONTE UNICA: shell/deploy.conf
 # ============================================================
-# Ficam em shell/deploy.conf para nao ser preciso editar este script quando
-# mudar a porta ou o servidor. Os valores abaixo sao apenas o fallback de
-# quem clonar o repositorio sem o arquivo.
-HOMOLOG_USER="root"
-HOMOLOG_HOST="192.168.0.10"
-HOMOLOG_DIR="/homologa/${APP_NAME}"
-HOMOLOG_PORT="8551"
-
-PRODUCTION_USER="gaulke"
-PRODUCTION_HOST="192.168.0.204"
-PRODUCTION_DIR="/home/gaulke/${APP_NAME}-main"
-PRODUCTION_PORT="8551"
-
+# Este script NAO tem valores proprios de host, diretorio ou porta.
+#
+# Ate aqui existia uma copia deles como "fallback", e ela era pior do que nao
+# ter: quem lesse o script via 8551, quem lesse o deploy.conf via outra coisa,
+# e nao havia como saber qual valia sem rastrear a ordem do `source`. Uma porta
+# errada aqui nao da erro — o container sobe saudavel e o proxy bate num lugar
+# onde nao ha nada escutando.
+#
+# Sem o arquivo, o script para. E preferivel a adivinhar o destino do deploy.
 DEPLOY_CONF="${SCRIPT_DIR}/deploy.conf"
-if [[ -f "$DEPLOY_CONF" ]]; then
-    # shellcheck source=/dev/null
-    source "$DEPLOY_CONF"
+
+if [[ ! -f "$DEPLOY_CONF" ]]; then
+    echo "ERRO: ${DEPLOY_CONF} nao encontrado."
+    echo "      E dele que saem servidor, diretorio e porta de cada ambiente."
+    exit 1
 fi
+
+# shellcheck source=/dev/null
+source "$DEPLOY_CONF"
+
+# Um nome faltando no deploy.conf viraria string vazia e o deploy iria para
+# "@:" ou publicaria na porta errada. Melhor recusar com o nome do que falta.
+for _chave in HOMOLOG_USER HOMOLOG_HOST HOMOLOG_DIR HOMOLOG_PORT \
+              PRODUCTION_USER PRODUCTION_HOST PRODUCTION_DIR PRODUCTION_PORT; do
+    if [[ -z "${!_chave:-}" ]]; then
+        echo "ERRO: ${_chave} nao definida em ${DEPLOY_CONF}."
+        exit 1
+    fi
+done
+unset _chave
 
 HOMOLOG_EXPORT_DIR="dist-docker-homolog"
 PRODUCTION_EXPORT_DIR="dist-docker-production"
