@@ -19,7 +19,11 @@ export const templates = pgTable('sys_mail_templates', {
   id: serial('id').primaryKey(),
   nome: varchar('nome', { length: 160 }).notNull(),
   assunto: varchar('assunto', { length: 300 }).notNull(),
+  // html e sempre a fonte para o ENVIO; em modo 'blocos' ele e GERADO a
+  // partir de `blocos` ao salvar, e nunca editado a mao
   html: text('html').notNull(),
+  formato: varchar('formato', { length: 10 }).default('html').notNull(),
+  blocos: jsonb('blocos'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 })
@@ -33,6 +37,9 @@ export const batches = pgTable(
     // Snapshot do que foi realmente enviado (o template pode mudar depois)
     assuntoSnapshot: varchar('assunto_snapshot', { length: 300 }).notNull(),
     htmlSnapshot: text('html_snapshot').notNull(),
+    // snapshot do editor visual, para reabrir um lote ja disparado
+    formato: varchar('formato', { length: 10 }).default('html').notNull(),
+    blocos: jsonb('blocos'),
     arquivoPath: text('arquivo_path'),
     arquivoNome: varchar('arquivo_nome', { length: 260 }),
     intervaloMs: integer('intervalo_ms').default(10000).notNull(),

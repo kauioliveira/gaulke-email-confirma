@@ -1,0 +1,29 @@
+O que eu pensei: temos nosso painel aqui da gaulke está em: "/home/vortens/Gaulke/gaulke-data-tools-ts"
+
+em atendimento já temos Tickets e Whatsapp
+
+eu pensei em duas possibilidades e queria ver com você qual é a melhor e por que e claro a mais simples
+
+O painel não é exposto para a internet, mas também daria para apontar para uma pasta dele mesmo no proxy revernos que temos na 204 com o nginx
+
+então o "notitica.contabilgualke.com.br" poderia apontar e ter porta propria ou não não sei o que é melhor
+
+hoje eu pensei do jeito que vc fez aqui
+
+Então eu pensei em colocar ele lá no painel junto com os atendimentos, pois ai podemos ter outros templates e quando alguém ou funcionário precisar enviar um anexo que precisa de ser "visto" e etc como está hoje, ou até mesmo evoluirmos para ter assinatura de recebimento e etc, não agora
+
+o que é melhor??
+
+Iframe dentro do painel, ou trazer toda a estrutura para ká e você só ajusta o que é necessário?? é tudo nuxtjs mesmo! Mas quero saber qual é a melhor alternativa dadas as circunstâncias parece que é melhor separado mesmo como eu pensei, mesmo porque eu consigo controlar melhor e o Iframe pode resolver de maneira simples e dependendo até ter a sessão ou até mesmo se quisermos podemos até não saber quem é da sessão só sabendo que está autenticado não precisa pedir senha sei lá... veja o que é melhor
+
+
+outra dúvida que é muito importante aqui temos já o login ou seja poderiamos controlar quem está fazendoo que e se optarmos pelo iframe podemos só autenticar aqui no painel e quem acessar a url ai sim precisa da senha que colocamos no .env...
+
+e ai qual é a melhor alternativa hoje? e me diga de 0 a 10 a complexidade 
+
+
+
+
+
+
+

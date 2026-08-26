@@ -1,4 +1,4 @@
-import { linkAcesso, linkPixel, linkLogo } from './urls'
+import { baseUrl, linkAcesso, linkPixel, linkLogo } from './urls'
 
 export type VarsDestinatario = {
   nome?: string | null
@@ -26,7 +26,9 @@ export function renderizar(html: string, r: VarsDestinatario, base?: string) {
   const seguras: Record<string, string> = {
     link: linkAcesso(r.token, base),
     pixel: linkPixel(r.token, base),
-    logo: linkLogo(base)
+    logo: linkLogo(base),
+    // usada pelo bloco de imagem do editor visual, que monta {{base}}/brand/arquivo
+    base: base ?? baseUrl()
   }
   const escapadas: Record<string, string> = {
     nome: escapeHtml(r.nome || r.email.split('@')[0]),

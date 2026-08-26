@@ -18,8 +18,6 @@ ENV PORT=3000
 RUN apk add --no-cache tini && addgroup -S app && adduser -S app -G app
 
 COPY --from=build /app/.output ./.output
-# o template inicial e lido do disco no primeiro boot (server/utils/seed.ts)
-COPY --from=build /app/emails ./emails
 # migrations + script, para rodar `npm run db:migrate` dentro do container
 COPY --from=build /app/server/db/migrations ./server/db/migrations
 COPY --from=build /app/scripts ./scripts

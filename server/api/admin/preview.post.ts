@@ -2,9 +2,15 @@ import { z } from 'zod'
 import { renderizar, renderizarAssunto } from '../../utils/render'
 import { novoToken, novoCodigo } from '../../utils/ids'
 import { baseUrlDoRequest } from '../../utils/urls'
+import { blocosSchema } from '../../utils/blocos-schema'
+import { renderizarBlocos } from '../../utils/blocos'
 
 const schema = z.object({
-  html: z.string(),
+  // o preview aceita HTML pronto OU os blocos do editor visual, e nesse caso
+  // gera o HTML pelo MESMO caminho do salvamento — o que a pessoa ve e
+  // exatamente o que sera gravado
+  html: z.string().optional(),
+  blocos: blocosSchema.optional(),
   assunto: z.string().default(''),
   exemplo: z
     .object({
@@ -17,7 +23,9 @@ const schema = z.object({
 
 /** Renderiza o template com dados ficticios para o preview visual. */
 export default defineEventHandler(async event => {
-  const { html, assunto, exemplo } = schema.parse(await readBody(event))
+  const { html, blocos, assunto, exemplo } = validar(schema, await readBody(event))
+  const fonte = blocos?.length ? renderizarBlocos(blocos, assunto) : html
+  if (!fonte) throw createError({ statusCode: 400, statusMessage: 'Informe o HTML ou os blocos' })
   const vars = {
     nome: exemplo?.nome || 'Maria Oliveira',
     email: exemplo?.email || 'maria.oliveira@exemplo.com.br',
@@ -32,7 +40,10 @@ export default defineEventHandler(async event => {
    * definitivo. O envio real continua usando URL_ACESSO.
    */
   return {
-    html: renderizar(html, vars, baseUrlDoRequest(event)),
-    assunto: renderizarAssunto(assunto, vars)
+    html: renderizar(fonte, vars, baseUrlDoRequest(event)),
+    assunto: renderizarAssunto(assunto, vars),
+    // HTML do template ANTES da substituicao das variaveis: e o que a aba
+    // "HTML" mostra quando o e-mail e montado por blocos
+    fonte
   }
 })

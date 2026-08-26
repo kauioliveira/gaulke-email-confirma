@@ -7,8 +7,21 @@ useHead({ title: 'Templates — Gaulke Envios' })
 const toast = useToast()
 const { data, refresh } = await useFetch<RespostaTemplates>(api('/api/admin/templates'))
 
+// imagens de public/brand, para o bloco de imagem do editor visual
+const { data: brand } = await useFetch<{ arquivos: { nome: string }[] }>(api('/api/admin/brand'), {
+  lazy: true,
+  server: false
+})
+const arquivosBrand = computed(() => brand.value?.arquivos || [])
+
 const selecionadoId = ref<number | null>(null)
-const form = reactive({ nome: '', assunto: '', html: '' })
+const form = reactive({
+  nome: '',
+  assunto: '',
+  html: '',
+  formato: 'blocos' as FormatoTemplate,
+  blocos: [] as Bloco[]
+})
 const salvando = ref(false)
 const emailTeste = ref('')
 const enviandoTeste = ref(false)
@@ -18,13 +31,20 @@ function carregar(t: any) {
   form.nome = t.nome
   form.assunto = t.assunto
   form.html = t.html
+  // templates antigos (escritos a mao) continuam em HTML; so os novos nascem
+  // em blocos, entao nada precisa ser migrado
+  form.formato = t.formato === 'blocos' ? 'blocos' : 'html'
+  form.blocos = Array.isArray(t.blocos) && t.blocos.length ? t.blocos : blocosPadraoCliente()
 }
 
 function novo() {
   selecionadoId.value = null
   form.nome = 'Novo template'
   form.assunto = 'Documento disponível para sua análise — {{codigo}}'
-  form.html = data.value?.templates[0]?.html || '<p>Olá {{nome}},</p>\n<p><a href="{{link}}">Acessar documento</a></p>'
+  // template novo nasce VISUAL: e o caminho para quem nao sabe HTML
+  form.formato = 'blocos'
+  form.blocos = blocosPadraoCliente()
+  form.html = ''
 }
 
 // abre o primeiro template automaticamente
@@ -32,8 +52,9 @@ if (data.value?.templates.length) carregar(data.value.templates[0])
 else novo()
 
 async function salvar() {
-  if (!form.nome || !form.assunto || !form.html) {
-    return toast.add({ title: 'Preencha nome, assunto e HTML', color: 'warning' })
+  const temConteudo = form.formato === 'blocos' ? form.blocos.length > 0 : !!form.html
+  if (!form.nome || !form.assunto || !temConteudo) {
+    return toast.add({ title: 'Preencha nome, assunto e o conteúdo do e-mail', color: 'warning' })
   }
   salvando.value = true
   try {
@@ -66,7 +87,12 @@ async function enviarTeste() {
   try {
     await $fetch(api('/api/admin/teste'), {
       method: 'POST',
-      body: { para: emailTeste.value, assunto: form.assunto, html: form.html }
+      body: {
+        para: emailTeste.value,
+        assunto: form.assunto,
+        // em modo visual o servidor gera o HTML pelos blocos, igual ao envio real
+        ...(form.formato === 'blocos' ? { blocos: form.blocos } : { html: form.html })
+      }
     })
     toast.add({
       title: 'E-mail de teste enviado',
@@ -86,7 +112,7 @@ async function enviarTeste() {
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold">Templates de e-mail</h1>
-        <p class="text-sm text-muted">Edite o HTML e veja exatamente como o destinatário vai receber.</p>
+        <p class="text-sm text-muted">Monte o e-mail com blocos e veja exatamente como o destinatário vai receber.</p>
       </div>
       <UButton icon="i-lucide-plus" label="Novo template" color="neutral" variant="outline" @click="novo" />
     </div>
@@ -124,7 +150,13 @@ async function enviarTeste() {
             </UFormField>
           </div>
 
-          <EditorHtml v-model="form.html" :assunto="form.assunto" />
+          <EditorEmail
+            v-model:formato="form.formato"
+            v-model:blocos="form.blocos"
+            v-model:html="form.html"
+            :assunto="form.assunto"
+            :arquivos="arquivosBrand"
+          />
 
           <USeparator />
 

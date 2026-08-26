@@ -57,17 +57,44 @@ resposta, não entra no relatório. Use só quando o atrito valer a pena.
 
 ## De onde vem a lista de destinatários
 
-O passo 1 do assistente aceita três origens, que passam pela **mesma** validação
-(e-mail válido, duplicados removidos, com relatório do que foi descartado):
+O passo 1 do assistente aceita quatro origens, todas passando pela **mesma**
+validação (e-mail válido, duplicados removidos, com aviso do que foi descartado):
+
+As quatro origens **somam** no mesmo lote, como um carrinho: você busca em uma,
+acrescenta, muda para outra e acrescenta mais. A lista é indexada por e-mail em
+minúsculas, então a deduplicação acontece por construção — duas origens
+trazendo a mesma pessoa resultam em **um** destinatário, e a tela avisa quantos
+já estavam lá.
 
 | Origem | Quando usar |
 |---|---|
-| **Importar arquivo** | CSV ou XLSX. A tela mostra o formato esperado e oferece um modelo para download (`/api/admin/modelo-lista`). Só a coluna de **e-mail** é obrigatória; o mapeamento das colunas é sugerido automaticamente e pode ser corrigido. |
-| **Do banco** | Reaproveita quem já recebeu algum envio. Cada pessoa aparece uma vez, com nome e empresa do envio mais recente. Filtra por lote de origem e por comportamento — "não confirmaram a leitura" é o caso mais comum de retrabalho. |
-| **Digitar** | Colar ou digitar, um por linha. Aceita `email@x.com`, `Nome <email@x.com>`, `Nome; email@x.com; Empresa` e a mesma variação com vírgula. Linhas com `#` são ignoradas. |
+| **Importar arquivo** | CSV ou XLSX. A tela mostra o formato esperado e oferece um modelo para download (`/api/admin/modelo-lista`). Só a coluna de **e-mail** é obrigatória; o mapeamento é sugerido e pode ser corrigido. |
+| **Do banco** | Quem já recebeu algum envio. Cada pessoa aparece uma vez, com nome e empresa do envio mais recente. Filtra por lote e por comportamento — "não confirmaram a leitura" é o caso mais comum de retrabalho. |
+| **Digitar** | Colar ou digitar, um por linha. Aceita `email@x.com`, `Nome <email@x.com>`, `Nome; email@x.com; Empresa` e a variação com vírgula. Linhas com `#` são ignoradas. |
+| **Do sistema** | Pessoas cadastradas nas tabelas da empresa: **colaboradores** (`users`) e **clientes pessoa física** (`client`). Busca por nome, e-mail, setor, CPF/CNPJ ou código. |
 
 A seleção feita em "Do banco" guarda o contato inteiro, não só o que está
 visível: trocar o filtro no meio da escolha não derruba ninguém da lista.
+
+### "Do sistema": o que dá e o que não dá
+
+[`server/api/admin/pessoas.get.ts`](server/api/admin/pessoas.get.ts) lê as
+tabelas de **outros sistemas** — por isso usa SQL puro e elas **não** entram em
+`server/db/schema.ts`: nenhuma ferramenta de migration pode chegar perto delas.
+
+| Fonte | Registros | Com e-mail |
+|---|---|---|
+| `users` (colaboradores) | 76 (46 ativos) | **46** — o e-mail é o `username` |
+| `client` (pessoa física) | 1.064 | **9** |
+| `company` (empresas) | 743 | **0 — a tabela não tem coluna de e-mail** |
+
+> **As empresas clientes não aparecem** porque não há para onde enviar: nem
+> `company`, nem `partner`, nem `internal_whatsapp_contacts` têm e-mail
+> preenchido. Um seletor de empresas ficaria bonito e não mandaria nada. Para
+> habilitar, é preciso primeiro uma fonte de e-mail por empresa.
+
+Clientes **bloqueados, inativos ou falecidos** são excluídos da busca — são
+situações em que disparar um comunicado seria, no mínimo, constrangedor.
 
 ## Telas
 
@@ -295,6 +322,39 @@ npm run build && node .output/server/index.mjs
 - IP é dado pessoal: aparece só na área autenticada, nunca em página pública.
 - Retenção declarada ao titular: **24 meses**. O expurgo ainda é manual —
   veja "Pendências".
+
+## Editor visual do e-mail
+
+O template é montado com **blocos**, não escrito em HTML: logo, título,
+parágrafo, aviso destacado, lista, botão, código, imagem, separador e rodapé.
+A pessoa arrasta para reordenar, escreve em campos comuns e insere `{{nome}}`
+clicando numa etiqueta — a variável entra na posição do cursor.
+
+**Por que gerar o HTML em vez de deixar editar:** cliente de e-mail não é
+navegador. O Outlook ignora CSS moderno, então a marcação precisa ser tabela
+aninhada com estilo inline. Um editor livre produziria `div` e `span`, e o
+e-mail chegaria quebrado sem ninguém perceber até o cliente reclamar. Com
+blocos, [`server/utils/blocos.ts`](server/utils/blocos.ts) gera sempre a
+marcação testada.
+
+Três garantias que vêm do modelo, não de disciplina:
+
+- **O rodapé de LGPD não pode ser removido** — é ele que avisa o destinatário
+  sobre o registro de acesso. O texto é editável; o bloco, não. A regra vale
+  também no servidor ([`blocos-schema.ts`](server/utils/blocos-schema.ts)):
+  um POST direto sem rodapé é recusado.
+- **O botão de acesso não some** e sempre aponta para `{{link}}`.
+- **O texto do operador é escapado** — um `<script>` colado num parágrafo
+  chega como texto, não como código.
+
+O `html` continua sendo a fonte para o envio: ao salvar em modo blocos, ele é
+**gerado** e gravado junto. Preview, criação de lote, disparo e relatório
+seguem funcionando sem saber que blocos existem.
+
+A aba **HTML** mostra o resultado em somente-leitura (com as variáveis ainda no
+lugar) e oferece "Converter para HTML livre" — caminho de mão única, para quem
+quiser assumir a marcação. Templates escritos à mão continuam em modo `html` e
+não são migrados.
 
 ## Busca e ordenação dos lotes
 

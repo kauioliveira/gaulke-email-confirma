@@ -15,7 +15,7 @@ export default defineEventHandler(async event => {
     })
   }
 
-  const { senha } = schema.parse(await readBody(event))
+  const { senha } = validar(schema, await readBody(event))
 
   if (!senhaConfere(senha)) {
     registrarFalha(event)

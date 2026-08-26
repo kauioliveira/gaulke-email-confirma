@@ -14,13 +14,14 @@ const PASSOS = [
 ]
 
 /* ---------- Passo 1: lista ---------- */
-type Origem = 'arquivo' | 'banco' | 'manual'
+type Origem = 'arquivo' | 'banco' | 'manual' | 'sistema'
 const origem = ref<Origem>('arquivo')
 
 const ORIGENS = [
   { valor: 'arquivo' as Origem, titulo: 'Importar arquivo', icone: 'i-lucide-file-spreadsheet', desc: 'CSV ou XLSX' },
   { valor: 'banco' as Origem, titulo: 'Do banco', icone: 'i-lucide-database', desc: 'quem já recebeu antes' },
-  { valor: 'manual' as Origem, titulo: 'Digitar', icone: 'i-lucide-keyboard', desc: 'colar ou digitar' }
+  { valor: 'manual' as Origem, titulo: 'Digitar', icone: 'i-lucide-keyboard', desc: 'colar ou digitar' },
+  { valor: 'sistema' as Origem, titulo: 'Do sistema', icone: 'i-lucide-users-round', desc: 'equipe e clientes' }
 ]
 
 // o modelo mostrado na tela e o do download saem da MESMA fonte no servidor
@@ -190,57 +191,155 @@ function lerListaDigitada(texto: string) {
   return saida
 }
 
-/* ---------- As três origens viram uma lista só ---------- */
+/* ---------- Passo 1d: pessoas do sistema da empresa ---------- */
+const buscaPessoas = ref('')
+const origemPessoas = ref<'todas' | 'equipe' | 'cliente'>('todas')
+
+const consultaPessoas = computed(() => ({
+  busca: buscaPessoas.value || undefined,
+  origem: origemPessoas.value
+}))
+
+const { data: pessoasData, status: carregandoPessoas } = await useFetch<RespostaPessoas>(
+  api('/api/admin/pessoas'),
+  { query: consultaPessoas, watch: [consultaPessoas], lazy: true, server: false }
+)
+
+const pessoas = computed(() => pessoasData.value?.pessoas || [])
+
+const ORIGENS_PESSOA = [
+  { label: 'Equipe e clientes', value: 'todas' },
+  { label: 'Somente equipe', value: 'equipe' },
+  { label: 'Somente clientes', value: 'cliente' }
+]
+
+/* ---------- O carrinho: todas as origens somam no mesmo lote ---------- */
 const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
+type Item = {
+  email: string
+  nome: string
+  empresa: string
+  origem: string
+  extras: Record<string, string>
+}
+
 /**
- * Cada origem produz linhas cruas no mesmo formato; a validação e a
- * deduplicação são feitas UMA vez, logo abaixo. Sem isso, cada aba
- * repetiria as regras e elas divergiriam com o tempo.
+ * Indexado por e-mail em minúsculas: a deduplicação acontece por construção,
+ * não por uma checagem que alguém pode esquecer de rodar. Duas origens
+ * diferentes trazendo a mesma pessoa resultam em UM destinatário.
  */
-const linhasBrutas = computed(() => {
-  if (origem.value === 'arquivo') {
-    if (!importado.value || mapa.email === SEM_COLUNA) return []
-    return importado.value.linhas.map((l: any) => {
-      const extras: Record<string, string> = {}
-      for (const c of colunasExtras.value) if (l[c]) extras[c] = String(l[c])
-      return {
-        email: String(l[mapa.email] || ''),
-        nome: mapa.nome === SEM_COLUNA ? '' : String(l[mapa.nome] || ''),
-        empresa: mapa.empresa === SEM_COLUNA ? '' : String(l[mapa.empresa] || ''),
-        extras
-      }
-    })
-  }
+const carrinho = ref<Record<string, Item>>({})
 
-  if (origem.value === 'banco') {
-    return Object.values(escolhidos.value).map(c => ({ ...c, extras: {} }))
-  }
+const listaProcessada = computed(() => ({
+  validos: Object.values(carrinho.value),
+  rejeitados: [] as { linha: number; email: string; motivo: string }[]
+}))
 
-  return lerListaDigitada(textoManual.value)
-})
+const totalCarrinho = computed(() => Object.keys(carrinho.value).length)
 
-/** Mesma validação do servidor, para o operador ver o resultado antes de criar. */
-const listaProcessada = computed(() => {
-  const validos: any[] = []
-  const rejeitados: any[] = []
-  const vistos = new Set<string>()
+/** Resultado da última inclusão, mostrado logo abaixo do botão. */
+const ultimaInclusao = ref<{ adicionados: number; repetidos: number; invalidos: string[] } | null>(null)
 
-  linhasBrutas.value.forEach((l: any, i: number) => {
-    // na planilha a linha 1 é o cabeçalho, então a contagem começa em 2
-    const numero = origem.value === 'arquivo' ? i + 2 : i + 1
+function adicionar(linhas: { email: string; nome?: string; empresa?: string; extras?: Record<string, string> }[], origem: string) {
+  const novos = { ...carrinho.value }
+  let adicionados = 0
+  let repetidos = 0
+  const invalidos: string[] = []
+
+  for (const l of linhas) {
     const email = String(l.email || '').trim().toLowerCase()
+    if (!email) continue
+    if (!RE_EMAIL.test(email)) {
+      if (invalidos.length < 5) invalidos.push(email)
+      continue
+    }
+    if (novos[email]) {
+      repetidos++
+      continue
+    }
+    novos[email] = {
+      email,
+      nome: l.nome || '',
+      empresa: l.empresa || '',
+      origem,
+      extras: l.extras || {}
+    }
+    adicionados++
+  }
 
-    if (!email) return rejeitados.push({ linha: numero, email: '', motivo: 'E-mail em branco' })
-    if (!RE_EMAIL.test(email)) return rejeitados.push({ linha: numero, email, motivo: 'E-mail inválido' })
-    if (vistos.has(email)) return rejeitados.push({ linha: numero, email, motivo: 'Duplicado na lista' })
-    vistos.add(email)
+  carrinho.value = novos
+  ultimaInclusao.value = { adicionados, repetidos, invalidos }
 
-    validos.push({ email, nome: l.nome || '', empresa: l.empresa || '', extras: l.extras || {} })
+  toast.add({
+    title: adicionados
+      ? `${adicionados} destinatário(s) acrescentado(s)`
+      : 'Nada foi acrescentado',
+    description: [
+      repetidos ? `${repetidos} já estavam na lista` : '',
+      invalidos.length ? `${invalidos.length} com e-mail inválido` : ''
+    ].filter(Boolean).join(' · ') || undefined,
+    color: adicionados ? 'success' : 'warning'
   })
+}
 
-  return { validos, rejeitados }
-})
+function removerDoCarrinho(email: string) {
+  const { [email]: _fora, ...resto } = carrinho.value
+  carrinho.value = resto
+}
+
+function limparCarrinho() {
+  if (!confirm(`Remover os ${totalCarrinho.value} destinatários do lote?`)) return
+  carrinho.value = {}
+  ultimaInclusao.value = null
+}
+
+/* ---------- cada origem monta suas linhas e chama adicionar() ---------- */
+
+function adicionarDoArquivo() {
+  if (!importado.value || mapa.email === SEM_COLUNA) return
+  const linhas = importado.value.linhas.map((l: any) => {
+    const extras: Record<string, string> = {}
+    for (const c of colunasExtras.value) if (l[c]) extras[c] = String(l[c])
+    return {
+      email: String(l[mapa.email] || ''),
+      nome: mapa.nome === SEM_COLUNA ? '' : String(l[mapa.nome] || ''),
+      empresa: mapa.empresa === SEM_COLUNA ? '' : String(l[mapa.empresa] || ''),
+      extras
+    }
+  })
+  adicionar(linhas, 'arquivo')
+}
+
+function adicionarDoBanco() {
+  adicionar(Object.values(escolhidos.value), 'envio anterior')
+}
+
+function adicionarDigitados() {
+  adicionar(lerListaDigitada(textoManual.value), 'digitado')
+  textoManual.value = ''
+}
+
+function adicionarPessoa(p: Pessoa) {
+  adicionar([{ email: p.email, nome: p.nome, empresa: p.detalhe || '' }],
+    p.origem === 'equipe' ? 'equipe' : 'cliente')
+}
+
+function adicionarTodasPessoas() {
+  adicionar(
+    pessoas.value.map(p => ({ email: p.email, nome: p.nome, empresa: p.detalhe || '' })),
+    'sistema'
+  )
+}
+
+const CORES_ORIGEM: Record<string, string> = {
+  arquivo: 'neutral',
+  'envio anterior': 'info',
+  digitado: 'neutral',
+  equipe: 'primary',
+  cliente: 'success',
+  sistema: 'primary'
+}
 
 /* ---------- Passo 2: arquivo ---------- */
 const { data: arquivos, refresh: recarregarArquivos } = await useFetch<RespostaArquivos>(api('/api/admin/arquivos'))
@@ -279,13 +378,29 @@ const { data: templatesData } = await useFetch<RespostaTemplates>(api('/api/admi
 const templateId = ref<number | null>(null)
 const assunto = ref('')
 const html = ref('')
+const formatoEmail = ref<FormatoTemplate>('html')
+const blocosEmail = ref<Bloco[]>([])
 
+// imagens de public/brand, para o bloco de imagem do editor visual
+const { data: brand } = await useFetch<{ arquivos: { nome: string }[] }>(api('/api/admin/brand'), {
+  lazy: true,
+  server: false
+})
+const arquivosBrand = computed(() => brand.value?.arquivos || [])
+
+/**
+ * O lote HERDA o formato do template. Editar aqui altera só este envio — o
+ * template original continua intacto, que é o mesmo comportamento do assunto.
+ */
 function aplicarTemplate(id: number | null) {
   const t = templatesData.value?.templates.find(x => x.id === id)
   if (!t) return
   templateId.value = t.id
   assunto.value = t.assunto
   html.value = t.html
+  formatoEmail.value = (t as any).formato === 'blocos' ? 'blocos' : 'html'
+  const bs = (t as any).blocos
+  blocosEmail.value = Array.isArray(bs) && bs.length ? JSON.parse(JSON.stringify(bs)) : blocosPadraoCliente()
 }
 if (templatesData.value?.templates.length) aplicarTemplate(templatesData.value.templates[0]!.id)
 
@@ -348,8 +463,11 @@ const tempoEstimado = computed(() =>
 )
 
 const podeAvancar = computed(() => {
-  if (passo.value === 1) return listaProcessada.value.validos.length > 0
-  if (passo.value === 3) return !!assunto.value && !!html.value
+  if (passo.value === 1) return totalCarrinho.value > 0
+  if (passo.value === 3) {
+    const temConteudo = formatoEmail.value === 'blocos' ? blocosEmail.value.length > 0 : !!html.value
+    return !!assunto.value && temConteudo
+  }
   return true
 })
 
@@ -362,7 +480,10 @@ async function criarLote() {
         nome: nomeLote.value,
         templateId: templateId.value,
         assunto: assunto.value,
+        // em modo visual o HTML do lote é gerado pelos blocos no servidor
         html: html.value,
+        formato: formatoEmail.value,
+        blocos: formatoEmail.value === 'blocos' ? blocosEmail.value : null,
         arquivoNome: arquivoNome.value || null,
         arquivoOriginal: arquivoOriginal.value || null,
         intervaloMs: intervaloSegundos.value * 1000,
@@ -415,7 +536,7 @@ async function criarLote() {
 
       <div class="space-y-5">
         <!-- Escolha da origem -->
-        <div class="grid gap-3 sm:grid-cols-3">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <button
             v-for="o in ORIGENS"
             :key="o.valor"
@@ -516,6 +637,12 @@ async function criarLote() {
             />
           </UFormField>
 
+          <UButton
+            icon="i-lucide-plus"
+            :label="`Acrescentar ${importado.total} linha(s) ao lote`"
+            :disabled="mapa.email === SEM_COLUNA"
+            @click="adicionarDoArquivo"
+          />
         </template>
         </template>
 
@@ -557,6 +684,13 @@ async function criarLote() {
                 @click="alternarTodos"
               />
               <UBadge v-if="selecionados.length" color="primary" variant="subtle" :label="`${selecionados.length} selecionado(s)`" />
+              <UButton
+                icon="i-lucide-plus"
+                size="xs"
+                label="Acrescentar ao lote"
+                :disabled="!selecionados.length"
+                @click="adicionarDoBanco"
+              />
             </div>
           </div>
 
@@ -625,51 +759,193 @@ async function criarLote() {
             </ul>
             <p class="mt-2 text-xs text-muted">Linhas começando com <code>#</code> são ignoradas.</p>
           </div>
+
+          <UButton
+            icon="i-lucide-plus"
+            label="Acrescentar ao lote"
+            :disabled="!textoManual.trim()"
+            @click="adicionarDigitados"
+          />
         </template>
 
-        <!-- Resultado, comum às três origens -->
-        <template v-if="linhasBrutas.length">
-          <USeparator />
-          <div class="grid gap-3 sm:grid-cols-2">
-            <UAlert
-              color="success"
-              variant="subtle"
-              icon="i-lucide-user-check"
-              :title="`${listaProcessada.validos.length} destinatário(s) válidos`"
-              description="Duplicados foram removidos automaticamente."
-            />
-            <UAlert
-              v-if="listaProcessada.rejeitados.length"
-              color="warning"
-              variant="subtle"
-              icon="i-lucide-user-x"
-              :title="`${listaProcessada.rejeitados.length} linha(s) ignoradas`"
-              :description="listaProcessada.rejeitados.slice(0, 3).map(r => `linha ${r.linha}: ${r.motivo}`).join(' · ')"
+        <!-- ORIGEM: SISTEMA (users e client) -->
+        <template v-if="origem === 'sistema'">
+          <UAlert
+            color="info"
+            variant="subtle"
+            icon="i-lucide-info"
+            title="Pessoas cadastradas no sistema da empresa"
+            description="Colaboradores e clientes pessoa física. As empresas não aparecem aqui porque a tabela delas não tem e-mail cadastrado — não haveria para onde enviar."
+          />
+
+          <div class="grid gap-3 sm:grid-cols-3">
+            <UFormField label="Buscar" class="sm:col-span-2">
+              <UInput
+                v-model="buscaPessoas"
+                icon="i-lucide-search"
+                placeholder="Nome, e-mail, setor, CPF/CNPJ ou código"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Mostrar">
+              <USelect v-model="origemPessoas" :items="ORIGENS_PESSOA" class="w-full" />
+            </UFormField>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm text-muted">
+              {{ pessoas.length }} encontrado(s)
+              <span v-if="pessoasData">
+                · {{ pessoasData.totais.equipe }} na equipe, {{ pessoasData.totais.cliente }} clientes
+              </span>
+            </p>
+            <UButton
+              icon="i-lucide-plus"
+              size="xs"
+              color="neutral"
+              variant="outline"
+              :label="`Acrescentar os ${pessoas.length} da busca`"
+              :disabled="!pessoas.length"
+              @click="adicionarTodasPessoas"
             />
           </div>
 
-          <div v-if="listaProcessada.validos.length" class="overflow-x-auto rounded-lg border border-default">
-            <table class="w-full text-sm">
-              <thead class="bg-elevated/50 text-left text-xs uppercase text-muted">
+          <div class="max-h-96 overflow-y-auto rounded-lg border border-default">
+            <p v-if="carregandoPessoas === 'pending'" class="py-8 text-center text-sm text-muted">
+              Carregando…
+            </p>
+            <p v-else-if="!pessoas.length" class="py-8 text-center text-sm text-muted">
+              Ninguém encontrado com essa busca.
+            </p>
+            <table v-else class="w-full text-sm">
+              <thead class="sticky top-0 bg-default text-left text-xs uppercase text-muted">
                 <tr>
-                  <th class="px-3 py-2">Nome</th>
-                  <th class="px-3 py-2">E-mail</th>
-                  <th class="px-3 py-2">Empresa</th>
+                  <th class="px-3 py-2">Pessoa</th>
+                  <th class="px-3 py-2">Origem</th>
+                  <th class="w-24 px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(d, i) in listaProcessada.validos.slice(0, 8)" :key="i" class="border-t border-default">
-                  <td class="px-3 py-2">{{ d.nome || '—' }}</td>
-                  <td class="px-3 py-2 font-mono text-xs">{{ d.email }}</td>
-                  <td class="px-3 py-2">{{ d.empresa || '—' }}</td>
+                <tr v-for="pe in pessoas" :key="pe.chave" class="border-t border-default hover:bg-elevated/30">
+                  <td class="max-w-[320px] px-3 py-2">
+                    <p class="truncate font-medium">{{ pe.nome }}</p>
+                    <p class="truncate text-xs text-muted">{{ pe.email }}</p>
+                    <p v-if="pe.detalhe" class="truncate text-xs text-muted">{{ pe.detalhe }}</p>
+                  </td>
+                  <td class="px-3 py-2">
+                    <UBadge
+                      size="xs"
+                      variant="subtle"
+                      :color="pe.origem === 'equipe' ? 'primary' : 'success'"
+                      :label="pe.origem === 'equipe' ? 'equipe' : 'cliente'"
+                    />
+                  </td>
+                  <td class="px-3 py-2 text-right">
+                    <UButton
+                      v-if="carrinho[pe.email]"
+                      icon="i-lucide-check"
+                      size="xs"
+                      color="success"
+                      variant="soft"
+                      label="no lote"
+                      disabled
+                    />
+                    <UButton
+                      v-else
+                      icon="i-lucide-plus"
+                      size="xs"
+                      color="neutral"
+                      variant="outline"
+                      label="Acrescentar"
+                      @click="adicionarPessoa(pe)"
+                    />
+                  </td>
                 </tr>
               </tbody>
             </table>
-            <p v-if="listaProcessada.validos.length > 8" class="border-t border-default px-3 py-2 text-xs text-muted">
-              e mais {{ listaProcessada.validos.length - 8 }} destinatário(s)…
-            </p>
           </div>
         </template>
+
+        <!-- O LOTE: soma de todas as origens -->
+        <USeparator />
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p class="font-medium">
+              Destinatários do lote
+              <UBadge v-if="totalCarrinho" color="primary" variant="subtle" class="ml-2" :label="String(totalCarrinho)" />
+            </p>
+            <p class="text-xs text-muted">
+              Pode misturar origens — e-mails repetidos entram uma vez só.
+            </p>
+          </div>
+          <UButton
+            v-if="totalCarrinho"
+            icon="i-lucide-trash-2"
+            label="Limpar lista"
+            size="xs"
+            color="error"
+            variant="ghost"
+            @click="limparCarrinho"
+          />
+        </div>
+
+        <UAlert
+          v-if="ultimaInclusao && (ultimaInclusao.repetidos || ultimaInclusao.invalidos.length)"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-info"
+          title="Nem tudo entrou"
+          :description="[
+            ultimaInclusao.repetidos ? `${ultimaInclusao.repetidos} já estavam na lista` : '',
+            ultimaInclusao.invalidos.length ? `e-mail inválido: ${ultimaInclusao.invalidos.join(', ')}` : ''
+          ].filter(Boolean).join(' · ')"
+        />
+
+        <div v-if="!totalCarrinho" class="rounded-lg border border-dashed border-default py-8 text-center">
+          <UIcon name="i-lucide-inbox" class="size-8 text-muted" />
+          <p class="mt-2 text-sm text-muted">
+            Nenhum destinatário ainda. Escolha uma origem acima e acrescente.
+          </p>
+        </div>
+
+        <div v-else class="max-h-80 overflow-y-auto rounded-lg border border-default">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-default text-left text-xs uppercase text-muted">
+              <tr>
+                <th class="px-3 py-2">Nome</th>
+                <th class="px-3 py-2">E-mail</th>
+                <th class="px-3 py-2">Empresa</th>
+                <th class="px-3 py-2">Veio de</th>
+                <th class="w-10 px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in listaProcessada.validos" :key="d.email" class="border-t border-default">
+                <td class="max-w-[200px] truncate px-3 py-2">{{ d.nome || '—' }}</td>
+                <td class="px-3 py-2 font-mono text-xs">{{ d.email }}</td>
+                <td class="max-w-[180px] truncate px-3 py-2">{{ d.empresa || '—' }}</td>
+                <td class="px-3 py-2">
+                  <UBadge
+                    size="xs"
+                    variant="subtle"
+                    :color="(CORES_ORIGEM[d.origem] as any) || 'neutral'"
+                    :label="d.origem"
+                  />
+                </td>
+                <td class="px-3 py-2">
+                  <UButton
+                    icon="i-lucide-x"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    @click="removerDoCarrinho(d.email)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </UCard>
 
@@ -749,7 +1025,13 @@ async function criarLote() {
           </UFormField>
         </div>
 
-        <EditorHtml v-model="html" :assunto="assunto" />
+        <EditorEmail
+          v-model:formato="formatoEmail"
+          v-model:blocos="blocosEmail"
+          v-model:html="html"
+          :assunto="assunto"
+          :arquivos="arquivosBrand"
+        />
       </div>
     </UCard>
 

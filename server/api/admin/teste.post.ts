@@ -2,11 +2,15 @@ import { z } from 'zod'
 import { renderizar, renderizarAssunto, versaoTexto } from '../../utils/render'
 import { novoToken, novoCodigo } from '../../utils/ids'
 import { enviarEmail } from '../../utils/mailer'
+import { blocosSchema } from '../../utils/blocos-schema'
+import { renderizarBlocos } from '../../utils/blocos'
 
 const schema = z.object({
   para: z.string().email(),
   assunto: z.string().min(1),
-  html: z.string().min(1)
+  // aceita HTML pronto OU os blocos do editor visual
+  html: z.string().optional(),
+  blocos: blocosSchema.optional()
 })
 
 /**
@@ -15,7 +19,9 @@ const schema = z.object({
  * entao nada e rastreado.
  */
 export default defineEventHandler(async event => {
-  const { para, assunto, html } = schema.parse(await readBody(event))
+  const { para, assunto, html, blocos } = validar(schema, await readBody(event))
+  const fonte = blocos?.length ? renderizarBlocos(blocos, assunto) : html
+  if (!fonte) throw createError({ statusCode: 400, statusMessage: 'Informe o HTML ou os blocos' })
   const vars = {
     nome: 'Teste Gaulke',
     email: para,
@@ -28,7 +34,7 @@ export default defineEventHandler(async event => {
   const info = await enviarEmail({
     para,
     assunto: assuntoFinal,
-    html: renderizar(html, vars),
+    html: renderizar(fonte, vars),
     texto: versaoTexto(vars, assuntoFinal)
   })
   return { ok: true, messageId: info.messageId, resposta: info.response }

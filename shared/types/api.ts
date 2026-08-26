@@ -213,3 +213,22 @@ export interface RespostaContatos {
   /** quantos e-mails distintos existem no banco, ignorando os filtros */
   totalGeral: number
 }
+
+export type OrigemPessoa = 'equipe' | 'cliente'
+
+/** Pessoa vinda das tabelas do sistema da empresa (somente leitura). */
+export interface Pessoa {
+  chave: string
+  origem: OrigemPessoa
+  nome: string
+  email: string
+  detalhe: string | null
+  documento: string | null
+}
+
+export interface RespostaPessoas {
+  pessoas: Pessoa[]
+  total: number
+  /** quantos existem ao todo, ignorando a busca */
+  totais: { equipe: number; cliente: number }
+}

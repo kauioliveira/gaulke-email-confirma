@@ -18,6 +18,9 @@ const schema = z.object({
   pedirRecibo: z.boolean().default(false),
   // ISO 8601 com fuso; presente = o lote ja nasce agendado
   agendadoPara: z.string().datetime({ offset: true }).nullish(),
+  // snapshot do editor visual, para reabrir o lote depois
+  formato: z.enum(['blocos', 'html']).default('html'),
+  blocos: z.array(z.any()).nullish(),
   destinatarios: z
     .array(
       z.object({
@@ -31,7 +34,7 @@ const schema = z.object({
 })
 
 export default defineEventHandler(async event => {
-  const dados = schema.parse(await readBody(event))
+  const dados = validar(schema, await readBody(event))
   const db = useDb()
 
   // valida o arquivo antes de criar o lote, para nao disparar link quebrado
@@ -56,6 +59,8 @@ export default defineEventHandler(async event => {
       // snapshot: o relatorio precisa mostrar exatamente o que foi enviado
       assuntoSnapshot: dados.assunto,
       htmlSnapshot: dados.html,
+      formato: dados.formato,
+      blocos: (dados.blocos ?? null) as never,
       arquivoPath: dados.arquivoNome ?? null,
       arquivoNome: dados.arquivoOriginal || dados.arquivoNome || null,
       intervaloMs: dados.intervaloMs,

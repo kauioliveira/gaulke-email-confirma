@@ -15,7 +15,7 @@ const FOLGA_MS = 60_000
 
 export default defineEventHandler(async event => {
   const id = Number(getRouterParam(event, 'id'))
-  const { agendadoPara } = schema.parse(await readBody(event))
+  const { agendadoPara } = validar(schema, await readBody(event))
   const db = useDb()
 
   const lote = (await db.select().from(batches).where(eq(batches.id, id)))[0]
