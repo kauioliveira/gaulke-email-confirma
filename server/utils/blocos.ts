@@ -243,7 +243,7 @@ export function blocosPadrao(): Bloco[] {
       id: 'b-intro',
       tipo: 'texto',
       texto:
-        'Disponibilizamos um documento importante para a sua análise. O acesso é individual e está vinculado a este e-mail.'
+        'Disponibilizamos um documento importante para a sua análise{{#empresa}}, referente a {{empresa}}{{/empresa}}. O acesso é individual e está vinculado a este e-mail.'
     },
     {
       id: 'b-instrucao',

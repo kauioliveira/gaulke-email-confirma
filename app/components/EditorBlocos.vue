@@ -18,11 +18,16 @@ const toast = useToast()
 const selecionado = ref<string | null>(null)
 const arrastando = ref<string | null>(null)
 
-const VARIAVEIS = [
+const VARIAVEIS: { chave: string; rotulo?: string; desc: string }[] = [
   { chave: '{{nome}}', desc: 'Nome do destinatário' },
   { chave: '{{empresa}}', desc: 'Empresa do destinatário' },
   { chave: '{{email}}', desc: 'E-mail do destinatário' },
-  { chave: '{{codigo}}', desc: 'Código único do envio' }
+  { chave: '{{codigo}}', desc: 'Código único do envio' },
+  {
+    chave: '{{#empresa}}texto{{/empresa}}',
+    rotulo: '{{#empresa}}…{{/empresa}}',
+    desc: 'Trecho opcional: só aparece se a empresa do destinatário estiver preenchida (troque "texto" pelo conteúdo)'
+  }
 ]
 
 /** Blocos que a pessoa pode acrescentar (o rodapé é fixo e já existe). */
@@ -221,7 +226,7 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
             color="neutral"
             variant="outline"
             class="font-mono"
-            :label="v.chave"
+            :label="v.rotulo || v.chave"
             @mousedown.prevent
             @click="inserirVariavel(v.chave)"
           />

@@ -17,6 +17,26 @@ function escapeHtml(v: unknown) {
     .replace(/"/g, '&quot;')
 }
 
+const RE_VARIAVEL = /\{\{\s*([\w.-]+)\s*\}\}/g
+const RE_SECAO = /\{\{\s*#([\w.-]+)\s*\}\}([\s\S]*?)\{\{\s*\/\1\s*\}\}/g
+
+/**
+ * Trecho condicional: `{{#empresa}}, da {{empresa}}{{/empresa}}` so aparece
+ * quando o campo veio preenchido da planilha.
+ *
+ * Existe porque `empresa` e opcional na importacao: sem isto, um destinatario
+ * sem empresa receberia "para a sua analise, referente a ." — pontuacao solta
+ * que o operador so descobriria depois do lote enviado.
+ *
+ * Nao aninha: uma secao dentro da outra nao e suportada de proposito, porque
+ * o editor visual nao tem como mostrar isso de forma compreensivel.
+ */
+function aplicarSecoes(texto: string, preenchida: (chave: string) => boolean) {
+  return texto.replace(RE_SECAO, (_m, chave: string, corpo: string) =>
+    preenchida(chave.toLowerCase()) ? corpo : ''
+  )
+}
+
 /**
  * Substitui {{variavel}} no HTML. Valores sao escapados: um nome vindo da
  * planilha nunca deve conseguir injetar tag no corpo do e-mail.
@@ -40,7 +60,9 @@ export function renderizar(html: string, r: VarsDestinatario, base?: string) {
     if (!(k in seguras) && !(k in escapadas)) escapadas[k] = escapeHtml(v)
   }
 
-  let out = html.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (m, chave: string) => {
+  const comSecoes = aplicarSecoes(html, k => !!(seguras[k] || escapadas[k]))
+
+  let out = comSecoes.replace(RE_VARIAVEL, (m, chave: string) => {
     const k = chave.toLowerCase()
     if (k in seguras) return seguras[k]!
     if (k in escapadas) return escapadas[k]!
@@ -56,13 +78,15 @@ export function renderizar(html: string, r: VarsDestinatario, base?: string) {
 }
 
 export function renderizarAssunto(assunto: string, r: VarsDestinatario) {
-  return assunto.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (m, chave: string) => {
+  const valores: Record<string, string> = {
+    nome: r.nome || r.email.split('@')[0] || '',
+    empresa: r.empresa || '',
+    codigo: r.codigo,
+    email: r.email
+  }
+  return aplicarSecoes(assunto, k => !!valores[k]).replace(RE_VARIAVEL, (m, chave: string) => {
     const k = chave.toLowerCase()
-    if (k === 'nome') return r.nome || r.email.split('@')[0] || ''
-    if (k === 'empresa') return r.empresa || ''
-    if (k === 'codigo') return r.codigo
-    if (k === 'email') return r.email
-    return m
+    return k in valores ? valores[k]! : m
   })
 }
 

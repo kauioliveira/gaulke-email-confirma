@@ -21,14 +21,19 @@ const preview = ref({ html: '', assunto: '', fonte: '' })
 const carregando = ref(false)
 const larguraPreview = ref<'desktop' | 'mobile'>('desktop')
 
-const VARIAVEIS_HTML = [
+const VARIAVEIS_HTML: { chave: string; rotulo?: string; desc: string }[] = [
   { chave: '{{nome}}', desc: 'Nome do destinatário' },
   { chave: '{{empresa}}', desc: 'Empresa do destinatário' },
   { chave: '{{email}}', desc: 'E-mail do destinatário' },
   { chave: '{{codigo}}', desc: 'Código único (ex: GLK-7F3K-2M9Q)' },
   { chave: '{{link}}', desc: 'Link individual de acesso' },
   { chave: '{{logo}}', desc: 'Logo da empresa (URL pública)' },
-  { chave: '{{pixel}}', desc: 'Pixel de abertura (inserido automaticamente)' }
+  { chave: '{{pixel}}', desc: 'Pixel de abertura (inserido automaticamente)' },
+  {
+    chave: '{{#empresa}}texto{{/empresa}}',
+    rotulo: '{{#empresa}}…{{/empresa}}',
+    desc: 'Trecho opcional: só aparece se a empresa do destinatário estiver preenchida (troque "texto" pelo conteúdo)'
+  }
 ]
 
 /** O corpo enviado ao preview muda conforme o modo, mas o endpoint é o mesmo. */
@@ -213,7 +218,7 @@ async function converterParaHtml() {
                 color="neutral"
                 variant="outline"
                 class="font-mono"
-                :label="v.chave"
+                :label="v.rotulo || v.chave"
                 @click="inserirNoHtml(v.chave)"
               />
             </UTooltip>
