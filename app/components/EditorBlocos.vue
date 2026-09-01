@@ -199,7 +199,7 @@ function resumo(b: Bloco) {
     case 'codigo': return b.rotulo
     case 'lista': return `${b.itens.filter(i => i.trim()).length} item(ns)`
     case 'imagem': return b.arquivo || '(escolha um arquivo)'
-    case 'logo': return `alinhada à ${b.alinhamento}`
+    case 'logo': return 'faixa oficial (Cabecalho_1.png)'
     default: return ''
   }
 }
@@ -376,9 +376,14 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
             </div>
           </template>
 
-          <UFormField v-else-if="b.tipo === 'logo'" label="Alinhamento">
-            <USelect v-model="b.alinhamento" :items="ALINHAMENTOS" class="w-full sm:w-56" />
-          </UFormField>
+          <UAlert
+            v-else-if="b.tipo === 'logo'"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-image"
+            title="Arte fixa da empresa"
+            description="Usa a faixa Cabecalho_1.png em toda a largura do e-mail, a mesma dos demais comunicados. Não há o que ajustar aqui — para uma imagem própria, acrescente um bloco de Imagem."
+          />
 
           <template v-else-if="b.tipo === 'rodape'">
             <UAlert
@@ -386,7 +391,7 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
               variant="subtle"
               icon="i-lucide-shield-check"
               title="Este bloco não pode ser removido"
-              description="É ele que informa ao destinatário que o acesso é registrado — a base legal do rastreamento. O texto você pode ajustar."
+              description="É ele que informa ao destinatário que o acesso é registrado — a base legal do rastreamento. O texto você pode ajustar; logo abaixo dele entra sempre a faixa de contato da empresa (Cabecalho_2.png)."
             />
             <UFormField label="Texto do aviso">
               <UTextarea v-model="b.texto" :rows="4" class="w-full" />

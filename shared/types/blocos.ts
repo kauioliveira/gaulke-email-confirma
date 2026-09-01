@@ -65,7 +65,7 @@ export function ehBlocoFixo(tipo: TipoBloco) {
 }
 
 export const ROTULOS_BLOCO: Record<TipoBloco, string> = {
-  logo: 'Logo da empresa',
+  logo: 'Cabeçalho da empresa',
   titulo: 'Título',
   texto: 'Parágrafo',
   botao: 'Botão de acesso',
@@ -74,7 +74,7 @@ export const ROTULOS_BLOCO: Record<TipoBloco, string> = {
   lista: 'Lista de itens',
   separador: 'Separador',
   imagem: 'Imagem',
-  rodape: 'Rodapé (LGPD)'
+  rodape: 'Rodapé (LGPD + contato)'
 }
 
 export const ICONES_BLOCO: Record<TipoBloco, string> = {

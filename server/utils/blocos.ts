@@ -53,11 +53,22 @@ const CORES_AVISO: Record<CorAviso, { fundo: string; borda: string; texto: strin
 /** Cada bloco devolve UMA linha da tabela principal. */
 function renderizarBloco(b: Bloco): string {
   switch (b.tipo) {
+    /**
+     * Faixa oficial de cabecalho — a mesma arte que a empresa ja usa em toda a
+     * comunicacao dela. Ocupa os 600px do cartao, sem padding e sem borda: a
+     * moldura azul e os cantos arredondados ja vem desenhados no PNG.
+     *
+     * O bloco continua se chamando 'logo' de proposito: e o tipo gravado no
+     * `blocos jsonb` de todo template e lote ja salvos. Trocando o que ele
+     * renderiza, o visual novo vale para o que ja existe sem migrar nada.
+     * `b.alinhamento` deixou de ter efeito aqui — o campo segue no tipo so
+     * para nao invalidar os JSON antigos.
+     */
     case 'logo':
       return `
             <tr>
-              <td align="${ALINHAR[b.alinhamento]}" style="border-bottom:3px solid ${MARCA};padding:24px;">
-                <img src="{{logo}}" alt="Gaulke Contábil" width="180" style="display:block;border:0;max-width:180px;height:auto;" />
+              <td style="padding:0;font-size:0;line-height:0;">
+                <img src="{{base}}/brand/Cabecalho_1.png" alt="Gaulke Contábil informa" width="600" style="display:block;border:0;width:100%;max-width:600px;height:auto;" />
               </td>
             </tr>`
 
@@ -169,14 +180,27 @@ function renderizarBloco(b: Bloco): string {
               </td>
             </tr>`
 
+    /**
+     * Texto legal primeiro, faixa de contato por ultimo: `renderizarBlocos`
+     * empurra o rodape para o fim da lista, entao a arte fecha o cartao depois
+     * de TODO o conteudo, como o resto da comunicacao da empresa.
+     *
+     * O `alt` da faixa repete endereco e telefone porque muita gente le o
+     * e-mail com as imagens bloqueadas — sem isso, o contato sumiria.
+     */
     case 'rodape':
       return `
             <tr>
-              <td style="background-color:${FUNDO_SUAVE};border-top:1px solid ${BORDA};padding:20px 32px;margin-top:24px;">
+              <td style="background-color:${FUNDO_SUAVE};border-top:1px solid ${BORDA};padding:20px 32px;">
                 <p style="margin:0 0 8px 0;font-size:12px;line-height:1.6;color:${MUTADO};">
                   Este e-mail foi enviado para <strong>{{email}}</strong> e o link de acesso é de uso pessoal.
                 </p>
                 <p style="margin:0;font-size:11px;line-height:1.6;color:#94a3b8;">${comQuebras(b.texto)}</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0;font-size:0;line-height:0;">
+                <img src="{{base}}/brand/Cabecalho_2.png" alt="Gaulke Contábil — R. Francisco Pauli, 775, B. Oxford, São Bento do Sul/SC — Instagram @gaulkecontabil — Fale conosco: (47) 3012.7300" width="600" style="display:block;border:0;width:100%;max-width:600px;height:auto;" />
               </td>
             </tr>`
 
@@ -223,7 +247,6 @@ export function renderizarBlocos(blocos: Bloco[], preHeader = ''): string {
       <tr>
         <td align="center">
           <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid ${BORDA};">${linhas}
-            <tr><td style="height:8px;font-size:0;line-height:0;">&nbsp;</td></tr>
           </table>
         </td>
       </tr>

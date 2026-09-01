@@ -133,6 +133,16 @@ const whatsapp = computed(() => {
           <h1 class="text-2xl font-semibold">
             Olá, {{ data.nome || "tudo bem" }}!
           </h1>
+          <!--
+            A empresa so aparece quando veio preenchida na planilha: o campo e
+            opcional na importacao, e uma linha vazia aqui deixaria um buraco no
+            meio da saudacao. Menor que o titulo, mas em negrito e na cor da
+            marca — quem recebe documento de mais de um CNPJ precisa saber de
+            qual deles e este antes de baixar.
+          -->
+          <p v-if="data.empresa" class="text-base font-semibold text-primary">
+            {{ data.empresa }}
+          </p>
           <p class="max-w-md text-muted">
             Disponibilizamos um documento para a sua análise. Confirme a leitura
             para liberar o download.
@@ -150,9 +160,6 @@ const whatsapp = computed(() => {
               </p>
               <p class="mt-1 font-mono text-2xl font-bold tracking-widest">
                 {{ data.codigo }}
-              </p>
-              <p v-if="data.empresa" class="mt-2 text-sm text-muted">
-                {{ data.empresa }}
               </p>
             </div>
 
