@@ -5,6 +5,7 @@ import { novoToken, novoCodigo } from '../../../utils/ids'
 import { caminhoNoStorage } from '../../../utils/storage'
 import { stat } from 'node:fs/promises'
 import { registrarEvento } from '../../../utils/tracking'
+import { renderizarBlocos } from '../../../utils/blocos'
 
 const schema = z.object({
   nome: z.string().min(1).max(200),
@@ -76,6 +77,22 @@ export default defineEventHandler(async event => {
     }
   }
 
+  /**
+   * Em modo blocos o HTML e GERADO AQUI, e nao o que a tela mandou.
+   *
+   * O `html` do template e um cache derivado dos blocos, gravado quando ele foi
+   * salvo pela ultima vez. Quando a arte do e-mail muda (o cabecalho, por
+   * exemplo), esse cache fica velho: o preview redesenha na hora e mostra o
+   * visual novo, mas o lote saia com o HTML antigo — a tela dizia uma coisa e o
+   * destinatario recebia outra, sem erro nenhum aparecer. Regerar no envio
+   * elimina a divergencia, e de quebra impede que um html arbitrario vindo do
+   * cliente vire o corpo do e-mail.
+   */
+  const html =
+    dados.formato === 'blocos' && dados.blocos?.length
+      ? renderizarBlocos(dados.blocos as never, dados.assunto)
+      : dados.html
+
   if (dados.templateId) {
     const t = (await db.select({ id: templates.id }).from(templates).where(eq(templates.id, dados.templateId)))[0]
     if (!t) throw createError({ statusCode: 400, statusMessage: 'Template nao encontrado' })
@@ -88,7 +105,7 @@ export default defineEventHandler(async event => {
       templateId: dados.templateId ?? null,
       // snapshot: o relatorio precisa mostrar exatamente o que foi enviado
       assuntoSnapshot: dados.assunto,
-      htmlSnapshot: dados.html,
+      htmlSnapshot: html,
       formato: dados.formato,
       blocos: (dados.blocos ?? null) as never,
       // preenchido quando a pessoa entrou pela sessao do painel; com a senha
