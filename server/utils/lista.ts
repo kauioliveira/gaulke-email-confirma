@@ -1,5 +1,19 @@
 import Papa from 'papaparse'
-import * as XLSX from 'xlsx'
+/**
+ * O ENTRYPOINT ESM, e nao o pacote 'xlsx'.
+ *
+ * O build padrao (xlsx.js, CommonJS) faz `require('./dist/cpexcel.js')` para a
+ * tabela de codepages legada. O Nitro converte esse require num import com o
+ * CAMINHO ABSOLUTO da maquina que compilou — no container, /app/node_modules/
+ * xlsx/dist/cpexcel.js. Como a imagem de runtime copia so o .output, o arquivo
+ * nao existe la e QUALQUER importacao de lista quebrava em producao com
+ * ERR_MODULE_NOT_FOUND — inclusive CSV, que nem chega a usar o xlsx. Em
+ * desenvolvimento passava despercebido porque o caminho existia de verdade.
+ *
+ * O xlsx.mjs nao tem esse require: ele recebe a tabela por set_cptable, que
+ * nao usamos. Planilhas modernas (xlsx/xlsm) sao UTF-8 e nao dependem dela.
+ */
+import * as XLSX from 'xlsx/xlsx.mjs'
 
 export type LinhaBruta = Record<string, string>
 
@@ -11,7 +25,9 @@ export function lerPlanilha(nomeArquivo: string, dados: Buffer) {
   if (ehExcel) {
     const wb = XLSX.read(dados, { type: 'buffer' })
     const primeira = wb.SheetNames[0]
-    if (!primeira) throw createError({ statusCode: 400, statusMessage: 'Planilha vazia' })
+    if (!primeira) {
+      throw createError({ statusCode: 400, statusMessage: 'a planilha nao tem nenhuma aba com conteudo' })
+    }
     linhas = XLSX.utils.sheet_to_json<LinhaBruta>(wb.Sheets[primeira]!, { defval: '', raw: false })
   } else {
     // remove BOM do Excel brasileiro, senao a 1a coluna vem com ﻿ no nome

@@ -1,5 +1,14 @@
 <script setup lang="ts">
 import { tamanho, duracao } from '~/utils/formato'
+import {
+  FORMATOS_NOME,
+  AMOSTRA_NOME,
+  AMOSTRA_EMPRESA,
+  abreviarNome,
+  formatarNome,
+  formatarDestinatario,
+  type FormatoNome
+} from '~/utils/nomes'
 
 definePageMeta({ layout: 'admin', middleware: 'admin' })
 useHead({ title: 'Novo envio — Gaulke Envios' })
@@ -40,6 +49,30 @@ const SEM_COLUNA = '__sem_coluna__'
 
 const importando = ref(false)
 const importado = ref<any>(null)
+
+/**
+ * Erro da ULTIMA leitura de arquivo. Fica na tela ate a proxima tentativa —
+ * um toast some antes de a pessoa conseguir ler o que precisa corrigir.
+ */
+const erroImportacao = ref<{ arquivo: string; motivo: string; dica: string } | null>(null)
+
+/** Traduz a falha em algo acionavel: o que houve e o que fazer com o arquivo. */
+function dicaDoErro(mensagem: string, arquivo: string) {
+  const m = (mensagem || '').toLowerCase()
+  if (m.includes('10 mb') || m.includes('maior')) {
+    return 'O limite é 10 MB por arquivo. Apague colunas e abas que não serão usadas, ou divida a lista em partes e importe uma de cada vez — elas somam no mesmo lote.'
+  }
+  if (m.includes('csv ou xlsx')) {
+    return `"${arquivo}" não é um formato que o leitor entende. Abra no Excel ou no Google Planilhas e salve como CSV ou XLSX.`
+  }
+  if (m.includes('limite de')) {
+    return 'Divida a planilha em arquivos menores e importe um de cada vez — cada importação soma no mesmo lote.'
+  }
+  if (m.includes('vazia') || m.includes('colunas')) {
+    return 'O arquivo foi lido mas nenhuma coluna foi encontrada. Confira se a PRIMEIRA linha da primeira aba tem os nomes das colunas (Nome, E-mail, Empresa) e se não há linhas em branco antes dela.'
+  }
+  return 'Confira se o arquivo abre normalmente no Excel e se a primeira linha tem os nomes das colunas. Se ele veio de outro sistema, tente salvar de novo como CSV.'
+}
 const mapa = reactive({ email: SEM_COLUNA, nome: SEM_COLUNA, empresa: SEM_COLUNA })
 const colunasExtras = ref<string[]>([])
 
@@ -57,9 +90,23 @@ async function importar(e: Event) {
     mapa.nome = r.sugestao.nome || SEM_COLUNA
     mapa.empresa = r.sugestao.empresa || SEM_COLUNA
     colunasExtras.value = []
+    erroImportacao.value = null
     toast.add({ title: `${r.total} linha(s) lidas de ${r.arquivo}`, color: 'success' })
   } catch (err: any) {
-    toast.add({ title: 'Falha ao ler o arquivo', description: err?.statusMessage, color: 'error' })
+    const corpo = err?.data
+    const motivo =
+      err?.statusMessage || corpo?.statusMessage || corpo?.message || err?.message || 'Erro desconhecido ao ler o arquivo'
+    // o servidor manda dica e id quando a falha foi inesperada (500)
+    const detalhe = corpo?.data
+    erroImportacao.value = {
+      arquivo: arquivo.name,
+      motivo: `${err?.statusCode ? `HTTP ${err.statusCode} — ` : ''}${motivo}`,
+      dica: detalhe?.dica
+        ? `${detalhe.dica} (id do erro: ${detalhe.id} — procure por ele no log do servidor)`
+        : dicaDoErro(motivo, arquivo.name)
+    }
+    importado.value = null
+    toast.add({ title: 'Falha ao ler o arquivo', description: motivo, color: 'error' })
   } finally {
     importando.value = false
     input.value = ''
@@ -159,11 +206,13 @@ const textoManual = ref('')
  * A validação e a deduplicação acontecem depois, no mesmo caminho da planilha.
  */
 function lerListaDigitada(texto: string) {
-  const saida: { nome: string; email: string; empresa: string; extras: Record<string, string> }[] = []
+  const saida: { nome: string; email: string; empresa: string; extras: Record<string, string>; linha: number }[] = []
 
-  for (const linha of texto.split(/[\r\n]+/)) {
+  // \n sem +: a numeracao precisa acompanhar o que a pessoa ve no campo
+  texto.split(/\r?\n/).forEach((linha, i) => {
     const bruta = linha.trim()
-    if (!bruta || bruta.startsWith('#')) continue
+    const numero = i + 1
+    if (!bruta || bruta.startsWith('#')) return
 
     const comAngulo = bruta.match(/^(.*?)<([^>]+)>\s*$/)
     if (comAngulo) {
@@ -171,9 +220,10 @@ function lerListaDigitada(texto: string) {
         nome: comAngulo[1]!.trim().replace(/^["']|["']$/g, ''),
         email: comAngulo[2]!.trim(),
         empresa: '',
-        extras: {}
+        extras: {},
+        linha: numero
       })
-      continue
+      return
     }
 
     const partes = bruta.split(/[;,\t]/).map(p => p.trim())
@@ -181,12 +231,12 @@ function lerListaDigitada(texto: string) {
       const idx = partes.findIndex(p => p.includes('@'))
       const email = idx >= 0 ? partes[idx]! : partes[1]!
       const resto = partes.filter((_, i) => i !== (idx >= 0 ? idx : 1))
-      saida.push({ nome: resto[0] || '', email, empresa: resto[1] || '', extras: {} })
-      continue
+      saida.push({ nome: resto[0] || '', email, empresa: resto[1] || '', extras: {}, linha: numero })
+      return
     }
 
-    saida.push({ nome: '', email: bruta, empresa: '', extras: {} })
-  }
+    saida.push({ nome: '', email: bruta, empresa: '', extras: {}, linha: numero })
+  })
 
   return saida
 }
@@ -231,33 +281,130 @@ type Item = {
  */
 const carrinho = ref<Record<string, Item>>({})
 
+/**
+ * Padronizacao dos nomes escolhida por quem dispara. E aplicada na SAIDA, nao
+ * na entrada: o carrinho guarda o texto original, entao trocar de formato
+ * refaz a lista inteira sem perder informacao.
+ */
+const formatoNome = ref<FormatoNome>('titulo')
+const formatoEmpresa = ref<FormatoNome>('titulo')
+
+/** Abreviacao combina com qualquer uma das caixas, e so vale para o nome. */
+const abreviar = ref(false)
+
+/** Como cada opcao ficaria, no proprio texto de amostra do campo. */
+function exemploNome(f: FormatoNome) {
+  const base = formatarNome(AMOSTRA_NOME, f)
+  return abreviar.value ? abreviarNome(base) : base
+}
+
+const exemploEmpresa = (f: FormatoNome) => formatarNome(AMOSTRA_EMPRESA, f)
+
 const listaProcessada = computed(() => ({
-  validos: Object.values(carrinho.value),
+  validos: Object.values(carrinho.value).map(d =>
+    formatarDestinatario(d, {
+      nome: formatoNome.value,
+      empresa: formatoEmpresa.value,
+      abreviarNome: abreviar.value
+    })
+  ),
   rejeitados: [] as { linha: number; email: string; motivo: string }[]
 }))
 
 const totalCarrinho = computed(() => Object.keys(carrinho.value).length)
 
-/** Resultado da última inclusão, mostrado logo abaixo do botão. */
-const ultimaInclusao = ref<{ adicionados: number; repetidos: number; invalidos: string[] } | null>(null)
+/**
+ * Resultado da ultima inclusao. Guardamos a linha REJEITADA inteira, e nao so
+ * uma contagem: quem monta a lista precisa saber qual registro ficou de fora e
+ * por que, para conseguir corrigir a planilha — um "3 nao entraram" nao diz
+ * onde olhar.
+ */
+type Rejeitada = {
+  linha: number | null
+  valor: string
+  nome: string
+  motivo: string
+  detalhe: string
+}
 
-function adicionar(linhas: { email: string; nome?: string; empresa?: string; extras?: Record<string, string> }[], origem: string) {
+const ultimaInclusao = ref<{
+  origem: string
+  lidas: number
+  adicionados: number
+  rejeitadas: Rejeitada[]
+} | null>(null)
+
+/** Agrupa as rejeicoes por motivo, para o resumo de uma linha. */
+const resumoRejeicoes = computed(() => {
+  const r = ultimaInclusao.value
+  if (!r) return [] as { motivo: string; total: number }[]
+  const contas = new Map<string, number>()
+  for (const x of r.rejeitadas) contas.set(x.motivo, (contas.get(x.motivo) || 0) + 1)
+  return [...contas].map(([motivo, total]) => ({ motivo, total })).sort((a, b) => b.total - a.total)
+})
+
+const verTodasRejeicoes = ref(false)
+const LIMITE_REJEICOES = 8
+
+const rejeicoesVisiveis = computed(() => {
+  const todas = ultimaInclusao.value?.rejeitadas || []
+  return verTodasRejeicoes.value ? todas : todas.slice(0, LIMITE_REJEICOES)
+})
+
+type LinhaEntrada = {
+  email: string
+  nome?: string
+  empresa?: string
+  extras?: Record<string, string>
+  /** numero da linha na planilha ou no texto colado, quando a origem sabe */
+  linha?: number
+}
+
+function adicionar(linhas: LinhaEntrada[], origem: string) {
   const novos = { ...carrinho.value }
+  const rejeitadas: Rejeitada[] = []
+  // separa "ja estava no lote" de "repetido dentro do proprio arquivo": sao
+  // problemas diferentes e se corrigem em lugares diferentes
+  const nesteLote = new Set(Object.keys(carrinho.value))
+  const nestaImportacao = new Set<string>()
   let adicionados = 0
-  let repetidos = 0
-  const invalidos: string[] = []
 
-  for (const l of linhas) {
-    const email = String(l.email || '').trim().toLowerCase()
-    if (!email) continue
+  linhas.forEach((l, i) => {
+    const numero = l.linha ?? null
+    const bruto = String(l.email || '').trim()
+    const email = bruto.toLowerCase()
+    const rotulo = [l.nome, l.empresa].filter(Boolean).join(' · ')
+
+    const recusar = (motivo: string, detalhe: string) =>
+      rejeitadas.push({ linha: numero, valor: bruto, nome: rotulo, motivo, detalhe })
+
+    if (!email) {
+      return recusar(
+        'Sem e-mail',
+        rotulo
+          ? `A linha tem dados (${rotulo}) mas a coluna de e-mail está vazia — sem endereço não há para onde enviar.`
+          : 'A linha está sem endereço de e-mail. Confira se a coluna de e-mail foi apontada corretamente.'
+      )
+    }
     if (!RE_EMAIL.test(email)) {
-      if (invalidos.length < 5) invalidos.push(email)
-      continue
+      const dica = !bruto.includes('@')
+        ? 'falta o @ — pode ser que a coluna apontada não seja a do e-mail'
+        : bruto.includes(' ')
+          ? 'há espaço no meio do endereço'
+          : !/\.[^\s@]{2,}$/.test(bruto)
+            ? 'falta o domínio depois do ponto final (.com, .com.br)'
+            : 'o endereço não está num formato válido'
+      return recusar('E-mail inválido', `"${bruto}" — ${dica}.`)
     }
-    if (novos[email]) {
-      repetidos++
-      continue
+    if (nestaImportacao.has(email)) {
+      return recusar('Repetido na origem', `"${email}" aparece mais de uma vez nesta mesma ${origem === 'arquivo' ? 'planilha' : 'inclusão'} — só a primeira ocorrência entrou.`)
     }
+    if (nesteLote.has(email)) {
+      const jaTem = carrinho.value[email]
+      return recusar('Já estava no lote', `"${email}" já tinha entrado pela origem "${jaTem?.origem}" — cada pessoa recebe uma vez só.`)
+    }
+
+    nestaImportacao.add(email)
     novos[email] = {
       email,
       nome: l.nome || '',
@@ -266,20 +413,20 @@ function adicionar(linhas: { email: string; nome?: string; empresa?: string; ext
       extras: l.extras || {}
     }
     adicionados++
-  }
+  })
 
   carrinho.value = novos
-  ultimaInclusao.value = { adicionados, repetidos, invalidos }
+  ultimaInclusao.value = { origem, lidas: linhas.length, adicionados, rejeitadas }
+  verTodasRejeicoes.value = false
 
   toast.add({
     title: adicionados
       ? `${adicionados} destinatário(s) acrescentado(s)`
       : 'Nada foi acrescentado',
-    description: [
-      repetidos ? `${repetidos} já estavam na lista` : '',
-      invalidos.length ? `${invalidos.length} com e-mail inválido` : ''
-    ].filter(Boolean).join(' · ') || undefined,
-    color: adicionados ? 'success' : 'warning'
+    description: rejeitadas.length
+      ? `${rejeitadas.length} de ${linhas.length} ficaram de fora — o motivo de cada uma está listado abaixo.`
+      : undefined,
+    color: adicionados ? (rejeitadas.length ? 'warning' : 'success') : 'error'
   })
 }
 
@@ -298,10 +445,12 @@ function limparCarrinho() {
 
 function adicionarDoArquivo() {
   if (!importado.value || mapa.email === SEM_COLUNA) return
-  const linhas = importado.value.linhas.map((l: any) => {
+  const linhas = importado.value.linhas.map((l: any, i: number) => {
     const extras: Record<string, string> = {}
     for (const c of colunasExtras.value) if (l[c]) extras[c] = String(l[c])
     return {
+      // +2: a planilha comeca na linha 1 com o cabecalho
+      linha: i + 2,
       email: String(l[mapa.email] || ''),
       nome: mapa.nome === SEM_COLUNA ? '' : String(l[mapa.nome] || ''),
       empresa: mapa.empresa === SEM_COLUNA ? '' : String(l[mapa.empresa] || ''),
@@ -495,6 +644,12 @@ watch(contasAtivas, cs => {
   if (!contaId.value) contaId.value = cs.find(c => c.padrao)?.id ?? cs[0]?.id ?? 0
 }, { immediate: true })
 
+const rotuloFormatoNome = computed(() => {
+  const nome = FORMATOS_NOME.find(f => f.valor === formatoNome.value)?.titulo || ''
+  const empresa = FORMATOS_NOME.find(f => f.valor === formatoEmpresa.value)?.titulo || ''
+  return `nome ${abreviar.value ? 'abreviado, ' : ''}${nome.toLowerCase()} · empresa ${empresa.toLowerCase()}`
+})
+
 const contaEscolhida = computed(() => contasAtivas.value.find(c => c.id === contaId.value) || null)
 
 async function criarLote() {
@@ -624,6 +779,17 @@ async function criarLote() {
             </ul>
           </div>
 
+          <UAlert
+            v-if="erroImportacao"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-file-x"
+            :title="`Não deu para ler \u201c${erroImportacao.arquivo}\u201d: ${erroImportacao.motivo}`"
+            :description="erroImportacao.dica"
+            :close="{ color: 'error', variant: 'link' }"
+            @update:open="erroImportacao = null"
+          />
+
           <div class="rounded-lg border border-dashed border-default p-6 text-center">
             <UIcon name="i-lucide-file-spreadsheet" class="mx-auto size-10 text-muted" />
             <p class="mt-2 text-sm font-medium">Importe um arquivo CSV ou XLSX</p>
@@ -639,6 +805,16 @@ async function criarLote() {
 
         <template v-if="importado">
           <USeparator label="Mapeamento de colunas" />
+
+          <!-- Sem coluna de e-mail nada pode ser importado: diga isso antes do botao desabilitado -->
+          <UAlert
+            v-if="mapa.email === SEM_COLUNA"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-mail-question"
+            title="Nenhuma coluna de e-mail foi reconhecida"
+            :description="`O arquivo tem ${importado.colunas.length} coluna(s): ${importado.colunas.join(', ')}. Escolha abaixo qual delas contém o endereço — sem isso não há para onde enviar e nada pode ser acrescentado.`"
+          />
           <div class="grid gap-4 sm:grid-cols-3">
             <UFormField label="Coluna de e-mail" required>
               <USelect v-model="mapa.email" :items="opcoesColunas" class="w-full" />
@@ -917,17 +1093,118 @@ async function criarLote() {
           />
         </div>
 
-        <UAlert
-          v-if="ultimaInclusao && (ultimaInclusao.repetidos || ultimaInclusao.invalidos.length)"
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-info"
-          title="Nem tudo entrou"
-          :description="[
-            ultimaInclusao.repetidos ? `${ultimaInclusao.repetidos} já estavam na lista` : '',
-            ultimaInclusao.invalidos.length ? `e-mail inválido: ${ultimaInclusao.invalidos.join(', ')}` : ''
-          ].filter(Boolean).join(' · ')"
-        />
+        <!-- Padronizacao: vale para a lista inteira, e nome e empresa sao independentes -->
+        <div v-if="totalCarrinho" class="rounded-lg border border-default bg-elevated/40 p-3">
+          <p class="text-sm font-medium">Como escrever os nomes</p>
+          <p class="mb-3 text-xs text-muted">
+            Cada campo tem a sua escolha, e vale para a lista inteira. O e-mail é sempre gravado em minúsculas.
+          </p>
+
+          <div class="grid gap-4 lg:grid-cols-2">
+            <div>
+              <p class="mb-2 text-xs font-semibold uppercase text-muted">Nome da pessoa</p>
+              <div class="space-y-2">
+                <button
+                  v-for="f in FORMATOS_NOME"
+                  :key="f.valor"
+                  class="w-full rounded-lg border p-2.5 text-left transition"
+                  :class="formatoNome === f.valor ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
+                  @click="formatoNome = f.valor"
+                >
+                  <p class="text-sm font-medium">{{ f.titulo }}</p>
+                  <p class="truncate text-xs text-muted">{{ exemploNome(f.valor) }}</p>
+                </button>
+              </div>
+
+              <UCheckbox
+                v-model="abreviar"
+                class="mt-2"
+                label="Abreviar o nome"
+                help="Primeiro nome e último sobrenome por extenso, os do meio viram inicial."
+              />
+            </div>
+
+            <div>
+              <p class="mb-2 text-xs font-semibold uppercase text-muted">Empresa</p>
+              <div class="space-y-2">
+                <button
+                  v-for="f in FORMATOS_NOME"
+                  :key="f.valor"
+                  class="w-full rounded-lg border p-2.5 text-left transition"
+                  :class="formatoEmpresa === f.valor ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
+                  @click="formatoEmpresa = f.valor"
+                >
+                  <p class="text-sm font-medium">{{ f.titulo }}</p>
+                  <p class="truncate text-xs text-muted">{{ exemploEmpresa(f.valor) }}</p>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Por que cada linha ficou de fora: sem isso a pessoa nao tem como corrigir a lista -->
+        <div
+          v-if="ultimaInclusao && ultimaInclusao.rejeitadas.length"
+          class="overflow-hidden rounded-lg border border-warning/40 bg-warning/5"
+        >
+          <div class="flex flex-wrap items-start gap-3 p-3">
+            <UIcon name="i-lucide-triangle-alert" class="mt-0.5 size-5 shrink-0 text-warning" />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium">
+                {{ ultimaInclusao.rejeitadas.length }} de {{ ultimaInclusao.lidas }} linha(s) não entraram
+              </p>
+              <p class="text-xs text-muted">
+                {{ ultimaInclusao.adicionados }} acrescentada(s) ao lote. Nada foi perdido do arquivo original —
+                corrija e importe de novo, que só as novas entram.
+              </p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <UBadge
+                  v-for="r in resumoRejeicoes"
+                  :key="r.motivo"
+                  size="xs"
+                  color="warning"
+                  variant="subtle"
+                  :label="`${r.total} · ${r.motivo}`"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="max-h-64 overflow-y-auto border-t border-warning/30 bg-default">
+            <table class="w-full text-left text-xs">
+              <thead class="sticky top-0 bg-elevated/80 uppercase text-muted">
+                <tr>
+                  <th class="w-16 px-3 py-1.5">Linha</th>
+                  <th class="px-3 py-1.5">Motivo</th>
+                  <th class="px-3 py-1.5">O que aconteceu</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, i) in rejeicoesVisiveis" :key="i" class="border-t border-default align-top">
+                  <td class="px-3 py-1.5 font-mono text-muted">{{ r.linha ?? '—' }}</td>
+                  <td class="px-3 py-1.5 whitespace-nowrap font-medium">{{ r.motivo }}</td>
+                  <td class="px-3 py-1.5 text-muted">
+                    {{ r.detalhe }}
+                    <span v-if="r.nome" class="block text-[11px] opacity-70">Linha: {{ r.nome }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-if="ultimaInclusao.rejeitadas.length > rejeicoesVisiveis.length || verTodasRejeicoes" class="border-t border-default bg-default px-3 py-2">
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              :icon="verTodasRejeicoes ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+              :label="verTodasRejeicoes
+                ? 'Mostrar menos'
+                : `Ver as outras ${ultimaInclusao.rejeitadas.length - rejeicoesVisiveis.length}`"
+              @click="verTodasRejeicoes = !verTodasRejeicoes"
+            />
+          </div>
+        </div>
 
         <div v-if="!totalCarrinho" class="rounded-lg border border-dashed border-default py-8 text-center">
           <UIcon name="i-lucide-inbox" class="size-8 text-muted" />
@@ -1132,6 +1409,10 @@ async function criarLote() {
             <p class="truncate text-sm font-medium">{{ arquivoOriginal || 'nenhum' }}</p>
           </div>
         </div>
+
+        <p class="text-xs text-muted">
+          Formatação gravada: <span class="font-medium text-default">{{ rotuloFormatoNome }}</span>.
+        </p>
 
         <USeparator />
 
