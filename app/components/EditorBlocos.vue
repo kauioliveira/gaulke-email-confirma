@@ -12,7 +12,20 @@ import type { Bloco, TipoBloco } from '~~/shared/types/blocos'
  */
 const blocos = defineModel<Bloco[]>({ required: true })
 
-const props = defineProps<{ arquivos?: { nome: string }[] }>()
+type ImagemDisponivel = { nome: string; caminho: string; origem?: 'sistema' | 'enviada' }
+
+const props = defineProps<{
+  arquivos?: ImagemDisponivel[]
+  /**
+   * O envio tem anexo? Com anexo o botão de acesso volta a ser obrigatório —
+   * sem ele o e-mail anuncia um documento que ninguém alcança. Sem anexo é um
+   * comunicado, e o botão é opcional.
+   */
+  exigeBotao?: boolean
+}>()
+
+/** Avisa o pai que uma imagem nova foi enviada e a lista precisa recarregar. */
+const emit = defineEmits<{ imagemEnviada: [] }>()
 
 const toast = useToast()
 const selecionado = ref<string | null>(null)
@@ -55,9 +68,55 @@ const ALINHAMENTOS = [
   { label: 'Direita', value: 'direita' }
 ]
 
+/**
+ * O `value` é o CAMINHO ('img/x.png'), não o nome: é ele que o bloco guarda e
+ * que vira o src no e-mail. Duas imagens de origens diferentes podem ter o
+ * mesmo nome, então o nome sozinho seria ambíguo.
+ */
 const opcoesArquivos = computed(() =>
-  (props.arquivos || []).map(a => ({ label: a.nome, value: a.nome }))
+  (props.arquivos || []).map(a => ({
+    label: a.origem === 'sistema' ? `${a.nome} (arte da empresa)` : a.nome,
+    value: a.caminho
+  }))
 )
+
+/** URL para exibir a imagem na miniatura do editor. */
+function urlDaImagem(caminho: string) {
+  if (!caminho) return ''
+  // valor legado sem prefixo: era sempre de public/brand
+  return api(`/${caminho.includes('/') ? caminho : `brand/${caminho}`}`)
+}
+
+const enviandoImagem = ref(false)
+
+async function enviarImagem(b: Bloco, ev: Event) {
+  if (b.tipo !== 'imagem') return
+  const input = ev.target as HTMLInputElement
+  const arquivo = input.files?.[0]
+  if (!arquivo) return
+  enviandoImagem.value = true
+  try {
+    const fd = new FormData()
+    fd.append('arquivo', arquivo)
+    const r = await $fetch<{ caminho: string }>(api('/api/admin/imagens'), { method: 'POST', body: fd })
+    b.arquivo = r.caminho
+    // o alt em branco deixa a imagem muda para quem lê com as imagens
+    // bloqueadas, que é metade das pessoas num comunicado corporativo
+    if (!b.alt) b.alt = arquivo.name.replace(/\.[^.]+$/, '')
+    emit('imagemEnviada')
+    toast.add({ title: 'Imagem enviada', description: arquivo.name, color: 'success' })
+  } catch (err) {
+    const e = err as { statusMessage?: string; data?: { statusMessage?: string }; message?: string }
+    toast.add({
+      title: 'Não deu para enviar a imagem',
+      description: e?.data?.statusMessage || e?.statusMessage || e?.message || 'Erro desconhecido',
+      color: 'error'
+    })
+  } finally {
+    enviandoImagem.value = false
+    input.value = ''
+  }
+}
 
 function novoId() {
   return `b-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -100,10 +159,15 @@ function remover(id: string) {
     })
     return
   }
-  if (b.tipo === 'botao' && blocos.value.filter(x => x.tipo === 'botao').length === 1) {
+  /**
+   * O botão só é intocável quando há anexo. Num comunicado sem arquivo ele
+   * leva a uma página que não tem o que entregar, então exigi-lo ali era
+   * herança do caso de uso original (mandar um PDF), não uma necessidade.
+   */
+  if (b.tipo === 'botao' && props.exigeBotao && blocos.value.filter(x => x.tipo === 'botao').length === 1) {
     toast.add({
       title: 'O e-mail precisa do botão de acesso',
-      description: 'É ele que leva o destinatário ao documento.',
+      description: 'Este envio tem um arquivo anexo, e é o botão que leva o destinatário até ele. Remova o anexo se quiser mandar só um aviso.',
       color: 'warning'
     })
     return
@@ -198,7 +262,7 @@ function resumo(b: Bloco) {
     case 'botao': return b.texto
     case 'codigo': return b.rotulo
     case 'lista': return `${b.itens.filter(i => i.trim()).length} item(ns)`
-    case 'imagem': return b.arquivo || '(escolha um arquivo)'
+    case 'imagem': return b.arquivo.split('/').pop() || '(escolha uma imagem)'
     case 'logo': return 'faixa oficial (Cabecalho_1.png)'
     default: return ''
   }
@@ -360,9 +424,49 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
           </template>
 
           <template v-else-if="b.tipo === 'imagem'">
-            <UFormField label="Arquivo" help="Precisa estar em public/brand para ser acessível pela internet.">
+            <div class="rounded-lg border border-dashed border-default p-4 text-center">
+              <UIcon name="i-lucide-image-plus" class="mx-auto size-6 text-dimmed" />
+              <p class="mt-2 text-sm font-medium">Envie uma imagem do seu computador</p>
+              <p class="mt-1 text-xs text-dimmed">PNG, JPEG, GIF ou WEBP, até 5 MB.</p>
+              <label class="mt-3 inline-block cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp"
+                  class="hidden"
+                  @change="enviarImagem(b, $event)"
+                >
+                <UButton
+                  as="span"
+                  icon="i-lucide-upload"
+                  :loading="enviandoImagem"
+                  :label="enviandoImagem ? 'Enviando...' : 'Escolher imagem'"
+                />
+              </label>
+            </div>
+
+            <USeparator v-if="opcoesArquivos.length" label="ou reutilize uma imagem já disponível" />
+
+            <UFormField
+              v-if="opcoesArquivos.length"
+              label="Imagem"
+              help="As enviadas por aqui ficam guardadas e podem ser reaproveitadas em outros comunicados."
+            >
               <USelect v-model="b.arquivo" :items="opcoesArquivos" class="w-full" />
             </UFormField>
+
+            <!--
+              Miniatura: é o que evita mandar a arte errada para a base inteira.
+              Antes só existia o nome do arquivo num select, e o erro só
+              aparecia no preview — ou no e-mail já enviado.
+            -->
+            <div v-if="b.arquivo" class="rounded-lg border border-default bg-elevated/50 p-3">
+              <img
+                :src="urlDaImagem(b.arquivo)"
+                :alt="b.alt || 'Prévia da imagem'"
+                class="mx-auto max-h-40 w-auto rounded"
+              >
+              <p class="mt-2 text-center text-xs text-dimmed">{{ b.arquivo }}</p>
+            </div>
             <div class="grid gap-3 sm:grid-cols-3">
               <UFormField label="Texto alternativo">
                 <UInput v-model="b.alt" class="w-full" />

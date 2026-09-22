@@ -60,8 +60,12 @@ export default defineNuxtConfig({
     // Acesso a area administrativa
     adminPassword: process.env.ADMIN_PASSWORD || "",
     sessionSecret: process.env.SESSION_SECRET || "",
-    // Diretorio privado onde ficam os PDFs dos lotes
+    // Diretorio privado onde ficam os anexos dos lotes
     storageDir: process.env.STORAGE_DIR || "./storage/files",
+    // Diretorio das imagens do corpo do e-mail. E publico (servido por /img/),
+    // ao contrario do storageDir — por isso sao dois diretorios, e nao um.
+    // Ambos precisam de volume em producao: veja docker-compose.yml.
+    imagensDir: process.env.IMAGENS_DIR || "./storage/imagens",
     // Conexao Postgres (DATABASE_URL)
     databaseUrl: process.env.DATABASE_URL || "",
     // SMTP da empresa -> mapeado de NUXT_SMTP_*
@@ -105,7 +109,7 @@ export default defineNuxtConfig({
     baseURL: process.env.NUXT_APP_BASE_URL || "/",
     head: {
       htmlAttrs: { lang: "pt-BR" },
-      title: "Gaulke — Envio e Confirmação",
+      title: "Gaulke Comunica",
       meta: [
         { name: "viewport", content: "width=device-width, initial-scale=1" },
       ],

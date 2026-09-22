@@ -4,9 +4,10 @@ import { eq } from 'drizzle-orm'
 import { useDb, recipients, batches } from '../../../db'
 import { registrarEventoDoRequest } from '../../../utils/tracking'
 import { caminhoNoStorage } from '../../../utils/storage'
+import { mimeDoArquivo } from '../../../../shared/types/tipos-arquivo'
 
 /**
- * Download rastreado. O PDF fica FORA de public/ justamente para que a
+ * Download rastreado. O arquivo fica FORA de public/ justamente para que a
  * unica forma de baixa-lo seja passando por aqui, com token e registro.
  */
 export default defineEventHandler(async event => {
@@ -42,9 +43,16 @@ export default defineEventHandler(async event => {
 
   await registrarEventoDoRequest(event, linha.id, 'download', { arquivo: linha.arquivoNome })
 
-  const nomeExibido = (linha.arquivoNome || 'documento.pdf').replace(/["\\]/g, '')
+  const nomeExibido = (linha.arquivoNome || linha.arquivoPath).replace(/["\\]/g, '')
   setResponseHeaders(event, {
-    'content-type': 'application/pdf',
+    /**
+     * Vem da extensao do arquivo, e nao mais fixo em 'application/pdf'.
+     *
+     * Com o PDF como unico formato o valor fixo era inofensivo; com planilha e
+     * documento, ele entregaria um .xlsx anunciado como PDF — e o Excel recusa
+     * abrir. Extensao desconhecida vira octet-stream, nunca um palpite.
+     */
+    'content-type': mimeDoArquivo(nomeExibido),
     'content-length': info.size,
     'content-disposition': `attachment; filename="${nomeExibido}"`,
     'cache-control': 'no-store, private'

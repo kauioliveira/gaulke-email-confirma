@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import {
+  TIPOS_ANEXO,
+  acceptDe,
+  familiasDe,
+  iconeDoArquivo as iconePorExtensao
+} from '~~/shared/types/tipos-arquivo'
 import { tamanho, duracao } from '~/utils/formato'
 import {
   FORMATOS_NOME,
@@ -11,7 +17,7 @@ import {
 } from '~/utils/nomes'
 
 definePageMeta({ layout: 'admin', middleware: 'admin' })
-useHead({ title: 'Novo envio — Gaulke Envios' })
+useHead({ title: 'Novo envio — Gaulke Comunica' })
 
 const toast = useToast()
 const passo = ref(1)
@@ -496,7 +502,48 @@ const arquivoNome = ref('')
 const arquivoOriginal = ref('')
 const enviandoArquivo = ref(false)
 
-async function subirPdf(e: Event) {
+/**
+ * `accept` e lista de formatos saem do MESMO mapa que o servidor usa para
+ * aceitar o upload (shared/types/tipos-arquivo.ts). Mantê-los aqui à mão
+ * faria a tela oferecer um formato que o servidor recusa, ou o contrário.
+ */
+const ACCEPT_ANEXO = acceptDe(TIPOS_ANEXO)
+const FORMATOS_ANEXO = familiasDe(TIPOS_ANEXO)
+
+/** Ícone conforme a extensão, para a lista de arquivos já enviados. */
+function iconeDoArquivo(nome: string) {
+  return iconePorExtensao(nome || '')
+}
+
+/**
+ * Vincular um anexo torna o botão de acesso obrigatório — é ele que leva o
+ * destinatário até o arquivo. Se a pessoa já tinha removido o botão (o que é
+ * permitido num comunicado sem anexo), ele volta AQUI, com aviso, em vez de o
+ * erro aparecer lá na frente, na hora de criar o lote, com a lista já montada.
+ */
+function garantirBotaoDeAcesso() {
+  if (formatoEmail.value !== 'blocos' || !blocosEmail.value.length) return
+  if (blocosEmail.value.some(b => b.tipo === 'botao')) return
+
+  const botao: Bloco = {
+    id: `b-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    tipo: 'botao',
+    texto: 'Acessar documento'
+  }
+  // antes do rodapé, que fecha o e-mail
+  const i = blocosEmail.value.findIndex(b => b.tipo === 'rodape')
+  const lista = [...blocosEmail.value]
+  lista.splice(i >= 0 ? i : lista.length, 0, botao)
+  blocosEmail.value = lista
+
+  toast.add({
+    title: 'Botão de acesso recolocado',
+    description: 'Com um arquivo anexo o e-mail precisa do botão — sem ele o destinatário não chega ao documento.',
+    color: 'info'
+  })
+}
+
+async function subirAnexo(e: Event) {
   const input = e.target as HTMLInputElement
   const f = input.files?.[0]
   if (!f) return
@@ -508,9 +555,14 @@ async function subirPdf(e: Event) {
     arquivoNome.value = r.nome
     arquivoOriginal.value = r.nomeOriginal
     await recarregarArquivos()
-    toast.add({ title: 'PDF enviado', description: r.nomeOriginal, color: 'success' })
+    garantirBotaoDeAcesso()
+    toast.add({ title: 'Arquivo enviado', description: r.nomeOriginal, color: 'success' })
   } catch (err: any) {
-    toast.add({ title: 'Falha no upload', description: err?.statusMessage, color: 'error' })
+    toast.add({
+      title: 'Falha no upload',
+      description: err?.data?.statusMessage || err?.statusMessage,
+      color: 'error'
+    })
   } finally {
     enviandoArquivo.value = false
     input.value = ''
@@ -520,6 +572,13 @@ async function subirPdf(e: Event) {
 function escolherExistente(a: any) {
   arquivoNome.value = a.nome
   arquivoOriginal.value = a.nome
+  garantirBotaoDeAcesso()
+}
+
+/** Desvincula o anexo — o envio volta a ser um comunicado simples. */
+function removerAnexo() {
+  arquivoNome.value = ''
+  arquivoOriginal.value = ''
 }
 
 /* ---------- Passo 3: e-mail ---------- */
@@ -530,8 +589,13 @@ const html = ref('')
 const formatoEmail = ref<FormatoTemplate>('html')
 const blocosEmail = ref<Bloco[]>([])
 
-// imagens de public/brand, para o bloco de imagem do editor visual
-const { data: brand } = await useFetch<{ arquivos: { nome: string }[] }>(api('/api/admin/brand'), {
+/**
+ * Imagens do bloco de imagem: as artes fixas de public/brand e as enviadas
+ * pela tela, numa lista só. `recarregarImagens` roda depois de cada upload.
+ */
+const { data: brand, refresh: recarregarImagens } = await useFetch<{
+  arquivos: { nome: string; caminho: string; origem: 'sistema' | 'enviada' }[]
+}>(api('/api/admin/imagens'), {
   lazy: true,
   server: false
 })
@@ -1255,26 +1319,26 @@ async function criarLote() {
 
     <!-- PASSO 2 -->
     <UCard v-show="passo === 2">
-      <template #header><h2 class="font-semibold">2. Documento PDF</h2></template>
+      <template #header><h2 class="font-semibold">2. Anexo (opcional)</h2></template>
 
       <div class="space-y-5">
         <UAlert
           color="info"
           variant="subtle"
           icon="i-lucide-info"
-          title="O PDF não vai anexado no e-mail"
+          title="O arquivo não vai anexado no e-mail"
           description="Ele fica em área privada e só é entregue pela página com token — é assim que conseguimos registrar quem baixou."
         />
 
         <div class="rounded-lg border border-dashed border-default p-6 text-center">
           <UIcon name="i-lucide-file-up" class="mx-auto size-10 text-muted" />
-          <p class="mt-2 text-sm font-medium">Envie o PDF deste lote</p>
-          <p class="text-xs text-muted">Até 25 MB.</p>
+          <p class="mt-2 text-sm font-medium">Envie o arquivo deste lote</p>
+          <p class="text-xs text-muted">{{ FORMATOS_ANEXO }} — até 25 MB.</p>
           <label class="mt-3 inline-block">
-            <input type="file" accept="application/pdf,.pdf" class="hidden" @change="subirPdf" >
+            <input type="file" :accept="ACCEPT_ANEXO" class="hidden" @change="subirAnexo" >
             <span class="inline-flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-inverted">
               <UIcon :name="enviandoArquivo ? 'i-lucide-loader-circle' : 'i-lucide-upload'" :class="enviandoArquivo && 'animate-spin'" />
-              {{ enviandoArquivo ? 'Enviando...' : 'Escolher PDF' }}
+              {{ enviandoArquivo ? 'Enviando...' : 'Escolher arquivo' }}
             </span>
           </label>
         </div>
@@ -1289,7 +1353,7 @@ async function criarLote() {
               :class="arquivoNome === a.nome ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
               @click="escolherExistente(a)"
             >
-              <UIcon name="i-lucide-file-text" class="size-6 shrink-0 text-error" />
+              <UIcon :name="iconeDoArquivo(a.nome)" class="size-6 shrink-0 text-muted" />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{{ a.nome }}</p>
                 <p class="text-xs text-muted">{{ tamanho(a.tamanho) }}</p>
@@ -1301,12 +1365,29 @@ async function criarLote() {
 
         <UAlert
           v-if="!arquivoNome"
-          color="warning"
+          color="neutral"
           variant="subtle"
-          icon="i-lucide-triangle-alert"
+          icon="i-lucide-megaphone"
           title="Nenhum arquivo selecionado"
-          description="Você pode seguir sem PDF — a página mostrará apenas a confirmação de leitura."
+          description="Siga assim para mandar só um aviso: a página registra a ciência do destinatário e o e-mail não precisa do botão de acesso."
         />
+        <div
+          v-else
+          class="flex items-center gap-3 rounded-lg border border-primary bg-elevated/50 p-3"
+        >
+          <UIcon :name="iconeDoArquivo(arquivoOriginal)" class="size-6 shrink-0 text-primary" />
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium">{{ arquivoOriginal }}</p>
+            <p class="text-xs text-muted">Anexo deste envio</p>
+          </div>
+          <UButton
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            label="Remover"
+            @click="removerAnexo"
+          />
+        </div>
       </div>
     </UCard>
 
@@ -1335,6 +1416,8 @@ async function criarLote() {
           v-model:html="html"
           :assunto="assunto"
           :arquivos="arquivosBrand"
+          :exige-botao="!!arquivoNome"
+          @imagem-enviada="recarregarImagens"
         />
       </div>
     </UCard>

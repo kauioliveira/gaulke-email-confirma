@@ -2,7 +2,7 @@
 import { dataHora, CORES_STATUS } from '~/utils/formato'
 
 definePageMeta({ layout: 'admin', middleware: 'admin' })
-useHead({ title: 'Relatório — Gaulke Envios' })
+useHead({ title: 'Relatório — Gaulke Comunica' })
 
 const route = useRoute()
 const router = useRouter()

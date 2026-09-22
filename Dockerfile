@@ -39,9 +39,17 @@ COPY --from=build /app/server/db/migrations ./server/db/migrations
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/node_modules/postgres ./node_modules/postgres
 
-# PDFs dos lotes: precisa ser volume, senao somem a cada deploy
-RUN mkdir -p /app/storage/files && chown -R app:app /app/storage
-VOLUME ["/app/storage/files"]
+# Anexos dos lotes e imagens dos e-mails: precisam ser volume, senao somem a
+# cada deploy — e os links e as artes ja enviados aos clientes quebram.
+#
+# Os diretorios sao criados AQUI, e nao so pelo app em runtime, por causa da
+# ordem em que o Docker monta um volume nomeado vazio: ele copia o conteudo e o
+# DONO do caminho que existe na imagem. Se o caminho nao existir, o Docker cria
+# o ponto de montagem como ROOT — e o processo, que roda como `app` (USER
+# abaixo), passa a receber EACCES ao gravar. Em dev nada disso aparece: la o
+# processo e dono do diretorio.
+RUN mkdir -p /app/storage/files /app/storage/imagens && chown -R app:app /app/storage
+VOLUME ["/app/storage/files", "/app/storage/imagens"]
 
 USER app
 EXPOSE 3000

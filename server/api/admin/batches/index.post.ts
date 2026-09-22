@@ -6,6 +6,7 @@ import { caminhoNoStorage } from '../../../utils/storage'
 import { stat } from 'node:fs/promises'
 import { registrarEvento } from '../../../utils/tracking'
 import { renderizarBlocos } from '../../../utils/blocos'
+import { blocosSchema, faltaBotaoDeAcesso, MSG_BOTAO_OBRIGATORIO } from '../../../utils/blocos-schema'
 
 const schema = z.object({
   nome: z.string().min(1).max(200),
@@ -23,7 +24,15 @@ const schema = z.object({
   agendadoPara: z.string().datetime({ offset: true }).nullish(),
   // snapshot do editor visual, para reabrir o lote depois
   formato: z.enum(['blocos', 'html']).default('html'),
-  blocos: z.array(z.any()).nullish(),
+  /**
+   * Os MESMOS blocos que o editor de templates valida.
+   *
+   * Aqui era `z.array(z.any())`, o que deixava esta rota — a unica que
+   * realmente dispara e-mail — sem validacao nenhuma de bloco: um POST direto
+   * passava um rodape vazio, sem o aviso de LGPD, e o HTML era gerado a partir
+   * dele mesmo assim (veja a regeracao logo abaixo).
+   */
+  blocos: blocosSchema.nullish(),
   destinatarios: z
     .array(
       z.object({
@@ -40,6 +49,17 @@ export default defineEventHandler(async event => {
   const dados = validar(schema, await readBody(event))
   const operador = event.context.operador
   const db = useDb()
+
+  /**
+   * Com anexo, o botao de acesso volta a ser obrigatorio: sem ele o e-mail
+   * anuncia um documento que o destinatario nao tem como alcancar. Sem anexo a
+   * regra nao se aplica — e um comunicado, e o botao e opcional.
+   */
+  if (dados.arquivoNome && dados.formato === 'blocos' && dados.blocos?.length) {
+    if (faltaBotaoDeAcesso(dados.blocos)) {
+      throw createError({ statusCode: 400, statusMessage: MSG_BOTAO_OBRIGATORIO })
+    }
+  }
 
   // valida o arquivo antes de criar o lote, para nao disparar link quebrado
   if (dados.arquivoNome) {

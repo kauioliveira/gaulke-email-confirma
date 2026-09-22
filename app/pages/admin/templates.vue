@@ -2,13 +2,18 @@
 import { dataHora } from '~/utils/formato'
 
 definePageMeta({ layout: 'admin', middleware: 'admin' })
-useHead({ title: 'Templates — Gaulke Envios' })
+useHead({ title: 'Templates — Gaulke Comunica' })
 
 const toast = useToast()
 const { data, refresh } = await useFetch<RespostaTemplates>(api('/api/admin/templates'))
 
-// imagens de public/brand, para o bloco de imagem do editor visual
-const { data: brand } = await useFetch<{ arquivos: { nome: string }[] }>(api('/api/admin/brand'), {
+/**
+ * Imagens do bloco de imagem: as artes fixas de public/brand e as enviadas
+ * pela tela, numa lista só. `recarregarImagens` roda depois de cada upload.
+ */
+const { data: brand, refresh: recarregarImagens } = await useFetch<{
+  arquivos: { nome: string; caminho: string; origem: 'sistema' | 'enviada' }[]
+}>(api('/api/admin/imagens'), {
   lazy: true,
   server: false
 })
@@ -44,6 +49,16 @@ function novo() {
   // template novo nasce VISUAL: e o caminho para quem nao sabe HTML
   form.formato = 'blocos'
   form.blocos = blocosPadraoCliente()
+  form.html = ''
+}
+
+/** Aviso sem documento: o outro caso de uso, que não precisa de botão. */
+function novoComunicado() {
+  selecionadoId.value = null
+  form.nome = 'Novo comunicado'
+  form.assunto = 'Comunicado — Contábil Gaulke'
+  form.formato = 'blocos'
+  form.blocos = blocosComunicadoCliente()
   form.html = ''
 }
 
@@ -114,7 +129,8 @@ async function enviarTeste() {
         <h1 class="text-2xl font-semibold">Templates de e-mail</h1>
         <p class="text-sm text-muted">Monte o e-mail com blocos e veja exatamente como o destinatário vai receber.</p>
       </div>
-      <UButton icon="i-lucide-plus" label="Novo template" color="neutral" variant="outline" @click="novo" />
+      <UButton icon="i-lucide-file-plus" label="Novo com documento" color="neutral" variant="outline" @click="novo" />
+      <UButton icon="i-lucide-megaphone" label="Novo comunicado" color="neutral" variant="outline" @click="novoComunicado" />
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[260px_1fr]">
@@ -156,6 +172,7 @@ async function enviarTeste() {
             v-model:html="form.html"
             :assunto="form.assunto"
             :arquivos="arquivosBrand"
+            @imagem-enviada="recarregarImagens"
           />
 
           <USeparator />

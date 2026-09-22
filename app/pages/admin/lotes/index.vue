@@ -2,7 +2,7 @@
 import { dataHora, CORES_STATUS } from '~/utils/formato'
 
 definePageMeta({ layout: 'admin', middleware: 'admin' })
-useHead({ title: 'Lotes — Gaulke Envios' })
+useHead({ title: 'Lotes — Gaulke Comunica' })
 
 const toast = useToast()
 

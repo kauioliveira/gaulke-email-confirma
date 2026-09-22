@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: false });
-useHead({ title: "Entrar — Gaulke Envios" });
+useHead({ title: "Entrar — Gaulke Comunica" });
 
 const route = useRoute();
 const painelUrl = useRuntimeConfig().public.painelUrl;
@@ -68,7 +68,7 @@ async function entrar() {
         <div class="flex items-center gap-3">
           <UIcon name="i-lucide-mail-check" class="size-8 text-primary" />
           <div>
-            <p class="font-semibold">Gaulke · Envios</p>
+            <p class="font-semibold">Gaulke · Comunica</p>
             <p class="text-sm text-muted">Área administrativa</p>
           </div>
         </div>

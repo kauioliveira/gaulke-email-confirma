@@ -32,7 +32,7 @@ async function sair() {
       <div class="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4">
         <NuxtLink to="/admin/lotes" class="flex items-center gap-2 font-semibold">
           <UIcon name="i-lucide-mail-check" class="size-6 text-primary" />
-          <span class="hidden sm:inline">Gaulke · Envios</span>
+          <span class="hidden sm:inline">Gaulke · Comunica</span>
         </NuxtLink>
 
         <nav class="ml-4 hidden items-center gap-1 md:flex">

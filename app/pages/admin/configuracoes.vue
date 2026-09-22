@@ -9,7 +9,7 @@ import { dataHora } from '~/utils/formato'
  * a trava da tela é conveniência, a do servidor é a que vale.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin' })
-useHead({ title: 'Configurações — Gaulke Envios' })
+useHead({ title: 'Configurações — Gaulke Comunica' })
 
 const toast = useToast()
 const { data, refresh, pending } = await useFetch<RespostaContas>(api('/api/admin/contas'))

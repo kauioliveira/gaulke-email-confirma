@@ -31,9 +31,17 @@ services:
       - .env.production
 
     volumes:
-      # PDFs dos lotes. Sem volume eles somem a cada deploy, e os links
+      # Anexos dos lotes. Sem volume eles somem a cada deploy, e os links
       # ja enviados aos clientes passam a devolver "arquivo indisponivel".
       - arquivos:/app/storage/files
+      # Imagens usadas no corpo do e-mail. Mesmo motivo, com um agravante: a
+      # imagem e buscada pelo cliente de e-mail TODA VEZ que a mensagem e
+      # aberta, inclusive meses depois. Sem volume, comunicados antigos passam
+      # a exibir uma arte quebrada.
+      #
+      # Elas NAO ficam em public/brand justamente por isso: aquele diretorio e
+      # assado na imagem e nao tem como persistir o que for enviado pela tela.
+      - imagens:/app/storage/imagens
 
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/admin/sessao']
@@ -51,3 +59,5 @@ services:
 volumes:
   arquivos:
     name: gaulke-email-confirma-arquivos
+  imagens:
+    name: gaulke-email-confirma-imagens

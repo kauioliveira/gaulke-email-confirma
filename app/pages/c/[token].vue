@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { iconeDoArquivo } from "~~/shared/types/tipos-arquivo";
+
 /**
  * Página sempre clara, independente do tema do aparelho de quem recebe.
  *
@@ -16,7 +18,13 @@ const token = String(route.params.token);
 // o GET ja registra o evento de ACESSO no servidor
 const { data, error } = await useFetch<RespostaLanding>(api(`/api/c/${token}`));
 
-useHead({ title: "Documento disponível — Contábil Gaulke" });
+// sem anexo não há documento: anunciar um na aba seria promessa falsa
+useHead({
+  title: () =>
+    data.value?.temArquivo
+      ? "Documento disponível — Contábil Gaulke"
+      : "Comunicado — Contábil Gaulke",
+});
 
 const ciente = ref(false);
 const confirmando = ref(false);
@@ -194,32 +202,29 @@ const whatsapp = computed(() => {
               </div>
             </div>
 
-            <USeparator />
+            <!--
+              Sem anexo o passo de download nem aparece.
+              Antes ele mostrava um aviso de "nenhum arquivo" ao lado de um
+              botão desabilitado — quem recebia um simples comunicado lia
+              aquilo como erro, e não como o envio normal que é.
+            -->
+            <template v-if="data.temArquivo">
+              <USeparator />
 
-            <!-- Passo 2: download -->
-            <div>
-              <p class="mb-3 text-sm font-medium">2. Documento</p>
+              <!-- Passo 2: download -->
+              <div>
+                <p class="mb-3 text-sm font-medium">2. Documento</p>
 
-              <UAlert
-                v-if="!data.temArquivo"
-                color="neutral"
-                variant="subtle"
-                icon="i-lucide-file-x"
-                title="Nenhum arquivo anexo"
-                description="Este comunicado não possui documento para download."
-              />
-
-              <template v-else>
                 <div
                   class="mb-4 flex items-center gap-3 rounded-lg border border-default p-3"
                 >
                   <UIcon
-                    name="i-lucide-file-text"
-                    class="size-8 shrink-0 text-error"
+                    :name="iconeDoArquivo(data.arquivoNome || '')"
+                    class="size-8 shrink-0 text-primary"
                   />
                   <div class="min-w-0 flex-1">
                     <p class="truncate text-sm font-medium">
-                      {{ data.arquivoNome || "documento.pdf" }}
+                      {{ data.arquivoNome || "documento" }}
                     </p>
                     <p class="text-xs text-muted">
                       {{
@@ -247,8 +252,8 @@ const whatsapp = computed(() => {
                 >
                   Confirme a leitura acima para liberar o download.
                 </p>
-              </template>
-            </div>
+              </div>
+            </template>
           </div>
         </UCard>
 
@@ -261,10 +266,20 @@ const whatsapp = computed(() => {
             />
             <div class="space-y-1 text-xs leading-relaxed text-muted">
               <p class="font-medium text-default">Registro de acesso</p>
-              <p>
+              <!--
+                Sem anexo não há download a registrar. Declarar à pessoa um
+                tratamento de dados mais amplo do que o real é justamente o que
+                a LGPD manda não fazer.
+              -->
+              <p v-if="data.temArquivo">
                 Para comprovar a entrega e a ciência deste comunicado,
                 registramos a data, a hora e o endereço IP do seu acesso, da
                 confirmação de leitura e do download.
+              </p>
+              <p v-else>
+                Para comprovar a entrega e a ciência deste comunicado,
+                registramos a data, a hora e o endereço IP do seu acesso e da
+                confirmação de leitura.
               </p>
               <p>
                 O tratamento segue a Lei 13.709/2018 (LGPD), limita-se a essa

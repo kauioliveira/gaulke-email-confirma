@@ -24,6 +24,14 @@ export type BlocoSeparador = { id: string; tipo: 'separador' }
 export type BlocoImagem = {
   id: string
   tipo: 'imagem'
+  /**
+   * Caminho publico da imagem, COM o prefixo da origem:
+   *   'brand/Cabecalho_1.png'  arte que veio no codigo (public/brand)
+   *   'img/aviso-a1b2.png'     enviada pela tela (volume storage/imagens)
+   *
+   * Valor sem barra e legado — antes so existia public/brand e o campo
+   * guardava o nome solto. server/utils/blocos.ts resolve os dois.
+   */
   arquivo: string
   alt: string
   largura: number
@@ -52,6 +60,19 @@ export type FormatoTemplate = 'blocos' | 'html'
 export const RODAPE_TEXTO_PADRAO =
   'Para comprovar a entrega e a ciência deste comunicado, registramos a data, a hora e o ' +
   'endereço IP do acesso à página, da confirmação de leitura e do download do arquivo. ' +
+  'O tratamento desses dados segue a Lei 13.709/2018 (LGPD), limita-se a essa finalidade ' +
+  'e os registros são mantidos por 24 meses.'
+
+/**
+ * Mesmo aviso, sem a menção ao download — para comunicados SEM anexo.
+ *
+ * O texto padrão descreve um registro de download que, nesses envios, nunca
+ * acontece. Declarar à pessoa um tratamento de dados mais amplo do que o real
+ * é justamente o que a LGPD pede para não fazer.
+ */
+export const RODAPE_TEXTO_SEM_ARQUIVO =
+  'Para comprovar a entrega e a ciência deste comunicado, registramos a data, a hora e o ' +
+  'endereço IP do acesso à página e da confirmação de leitura. ' +
   'O tratamento desses dados segue a Lei 13.709/2018 (LGPD), limita-se a essa finalidade ' +
   'e os registros são mantidos por 24 meses.'
 

@@ -1,4 +1,5 @@
 import type { Bloco } from '~~/shared/types/blocos'
+import { RODAPE_TEXTO_PADRAO, RODAPE_TEXTO_SEM_ARQUIVO } from '~~/shared/types/blocos'
 
 /**
  * Ponto de partida de um template novo, no cliente.
@@ -30,11 +31,28 @@ export function blocosPadraoCliente(): Bloco[] {
       rotulo: 'Código de referência',
       ajuda: 'Informe este código caso precise falar com a nossa equipe.'
     },
+    { id: id('rod'), tipo: 'rodape', texto: RODAPE_TEXTO_PADRAO }
+  ]
+}
+
+/**
+ * Ponto de partida de um COMUNICADO: aviso sem documento para baixar.
+ *
+ * Não tem botão de acesso nem código de referência, e o rodapé usa a versão do
+ * texto de LGPD que não fala em download — porque aqui não há download. É o
+ * outro caso de uso do sistema, que antes não existia: tudo nascia assumindo
+ * que havia um arquivo a entregar.
+ */
+export function blocosComunicadoCliente(): Bloco[] {
+  const id = (s: string) => `b-${s}-${Math.random().toString(36).slice(2, 7)}`
+  return [
+    { id: id('logo'), tipo: 'logo', alinhamento: 'centro' },
+    { id: id('saud'), tipo: 'titulo', texto: 'Olá, {{nome}}!' },
     {
-      id: id('rod'),
-      tipo: 'rodape',
-      texto:
-        'Para comprovar a entrega e a ciência deste comunicado, registramos a data, a hora e o endereço IP do acesso à página, da confirmação de leitura e do download do arquivo. O tratamento desses dados segue a Lei 13.709/2018 (LGPD), limita-se a essa finalidade e os registros são mantidos por 24 meses.'
-    }
+      id: id('intro'),
+      tipo: 'texto',
+      texto: 'Escreva aqui o aviso que você quer comunicar.'
+    },
+    { id: id('rod'), tipo: 'rodape', texto: RODAPE_TEXTO_SEM_ARQUIVO }
   ]
 }

@@ -176,7 +176,7 @@ function renderizarBloco(b: Bloco): string {
       return `
             <tr>
               <td align="${ALINHAR[b.alinhamento]}" style="padding:16px 32px 0 32px;">
-                <img src="{{base}}/brand/${escapar(b.arquivo)}" alt="${escapar(b.alt)}" width="${Number(b.largura) || 400}" style="display:block;border:0;max-width:100%;height:auto;" />
+                <img src="{{base}}/${escapar(caminhoDaImagem(b.arquivo))}" alt="${escapar(b.alt)}" width="${Number(b.largura) || 400}" style="display:block;border:0;max-width:100%;height:auto;" />
               </td>
             </tr>`
 
@@ -207,6 +207,21 @@ function renderizarBloco(b: Bloco): string {
     default:
       return ''
   }
+}
+
+/**
+ * Caminho publico da imagem de um bloco.
+ *
+ * O campo `arquivo` guarda hoje um caminho com prefixo de origem
+ * ('brand/x.png' das artes que vieram no codigo, 'img/y.png' das enviadas pela
+ * tela). Antes ele guardava so o NOME, e sempre de public/brand — por isso um
+ * valor sem barra e tratado como legado e recebe 'brand/' na frente. Sem isso,
+ * todo template e lote salvos antes desta mudanca renderizariam imagem
+ * quebrada, inclusive os e-mails ja entregues, que buscam a arte a cada
+ * abertura.
+ */
+function caminhoDaImagem(arquivo: string) {
+  return arquivo.includes('/') ? arquivo : `brand/${arquivo}`
 }
 
 /**

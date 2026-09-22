@@ -7,7 +7,7 @@ const route = useRoute()
 const toast = useToast()
 const { data } = await useFetch<RespostaFichaDestinatario>(api(`/api/admin/destinatarios/${route.params.id}`))
 
-useHead({ title: () => `${data.value?.destinatario.email || 'Destinatário'} — Gaulke Envios` })
+useHead({ title: () => `${data.value?.destinatario.email || 'Destinatário'} — Gaulke Comunica` })
 
 const d = computed(() => data.value?.destinatario)
 const mostrarHtml = ref(false)

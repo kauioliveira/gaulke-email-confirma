@@ -8,7 +8,7 @@ const toast = useToast()
 const id = Number(route.params.id)
 
 const { data, refresh } = await useFetch<RespostaLote>(api(`/api/admin/batches/${id}`))
-useHead({ title: () => `${data.value?.lote.nome || 'Lote'} — Gaulke Envios` })
+useHead({ title: () => `${data.value?.lote.nome || 'Lote'} — Gaulke Comunica` })
 
 const { data: destinatarios, refresh: refreshDest } = await useFetch<RespostaDestinatarios>(
   api(`/api/admin/batches/${id}/destinatarios`),

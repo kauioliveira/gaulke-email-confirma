@@ -9,7 +9,15 @@ import type { Bloco, FormatoTemplate } from '~~/shared/types/blocos'
  * preview é sempre renderizado pelo servidor, pela MESMA função usada no envio
  * real — o que aparece aqui é o que o destinatário recebe.
  */
-const props = defineProps<{ assunto: string; arquivos?: { nome: string }[] }>()
+const props = defineProps<{
+  assunto: string
+  arquivos?: { nome: string; caminho: string; origem?: 'sistema' | 'enviada' }[]
+  /** Repassado ao editor de blocos: com anexo, o botão de acesso é obrigatório. */
+  exigeBotao?: boolean
+}>()
+
+/** Sobe do editor de blocos até a tela, que é quem recarrega a lista. */
+defineEmits<{ imagemEnviada: [] }>()
 
 const formato = defineModel<FormatoTemplate>('formato', { required: true })
 const blocos = defineModel<Bloco[]>('blocos', { required: true })
@@ -148,7 +156,13 @@ async function converterParaHtml() {
 
     <!-- VISUAL -->
     <div v-show="aba === 'editar'">
-      <EditorBlocos v-if="formato === 'blocos'" v-model="blocos" :arquivos="arquivos" />
+      <EditorBlocos
+        v-if="formato === 'blocos'"
+        v-model="blocos"
+        :arquivos="arquivos"
+        :exige-botao="exigeBotao"
+        @imagem-enviada="$emit('imagemEnviada')"
+      />
 
       <!-- template em HTML livre: o editor visual não se aplica -->
       <UAlert
