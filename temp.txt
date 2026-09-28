@@ -1,29 +1,43 @@
-O que eu pensei: temos nosso painel aqui da gaulke está em: "/home/vortens/Gaulke/gaulke-data-tools-ts"
-
-em atendimento já temos Tickets e Whatsapp
-
-eu pensei em duas possibilidades e queria ver com você qual é a melhor e por que e claro a mais simples
-
-O painel não é exposto para a internet, mas também daria para apontar para uma pasta dele mesmo no proxy revernos que temos na 204 com o nginx
-
-então o "notitica.contabilgualke.com.br" poderia apontar e ter porta propria ou não não sei o que é melhor
-
-hoje eu pensei do jeito que vc fez aqui
-
-Então eu pensei em colocar ele lá no painel junto com os atendimentos, pois ai podemos ter outros templates e quando alguém ou funcionário precisar enviar um anexo que precisa de ser "visto" e etc como está hoje, ou até mesmo evoluirmos para ter assinatura de recebimento e etc, não agora
-
-o que é melhor??
-
-Iframe dentro do painel, ou trazer toda a estrutura para ká e você só ajusta o que é necessário?? é tudo nuxtjs mesmo! Mas quero saber qual é a melhor alternativa dadas as circunstâncias parece que é melhor separado mesmo como eu pensei, mesmo porque eu consigo controlar melhor e o Iframe pode resolver de maneira simples e dependendo até ter a sessão ou até mesmo se quisermos podemos até não saber quem é da sessão só sabendo que está autenticado não precisa pedir senha sei lá... veja o que é melhor
+Precisamos alterar umas coisas aqui, pois isso aqui era antes somente um sistema para resolver um problema e agora vai virar um sistema de comunicação pois o pessoal gostou 
 
 
-outra dúvida que é muito importante aqui temos já o login ou seja poderiamos controlar quem está fazendoo que e se optarmos pelo iframe podemos só autenticar aqui no painel e quem acessar a url ai sim precisa da senha que colocamos no .env...
+1. se não estou errado tinhamos restrigindo só quem é admin e supervisor, agora todos poderão acessar, mas sempre guardar a informação de quem fez o que como já está fazendo.
 
-e ai qual é a melhor alternativa hoje? e me diga de 0 a 10 a complexidade 
+2. após o envio permitir arquivar os os "lotes" enviados assim fica melhor para visualizar e ai no , somente quem pode excluir enviado são admins e supervisores 
 
+3. permitir no filtro na pagina lotes de envio marcar também os arquivados mas por default não
 
+4. veja se consegue ainda melhorar ainda mais o sistema de templates para o usuário padrão, não para nós usuários de ti, eu gostei, mas se tiver melhorias vai ser muito bem feito
 
+5. o corpo do texto deve ser justificado
 
+6. confira se duas coisas dentro dessa:
+6.1 pode mandar email SEM anexo é só para sabermos se a pessoa recebeu, abriu e etc acho que sim pois tem lá em template "novo com documento" e "novo comunicado" 
+6.2 o venvio de arquivo eu acho que já alteramos que não precisa ser somente pdf pios as vezes eles mandam outras coisas que não são só pdf
+
+7. excluir template também será atibuição do admin ou supervisor SE TIVER algum lote enviado, se não tiver nenhum lote enviado qualquer um pode excluir mas confirme duas vezes
+
+8. talvez para os usuários mais "leigos" seria melhor ao criar o template ir por fase, fase 1 por sexemplo eel escolhe se vai com documento ou é um comunicado, ai sim ele da nome envia teste etc como está eu acho que essa fase anterior ajuda eliminar duvidas
+
+9. agora as configurações devem mudar pois agora vai virar um sistema
+- criar uma tabela no nosso banco de dados para esse sistema de email "gaulke_comunica_" como prefixo dai eu sei o que é
+- trazer do .env a configuração de usuário e senha, configuração do smtp e tudo pois ai vamos fazer a gestão por ali...
+- nessa configuração sim somente admin pode alterar
+- pode criar multiplas caixas o smtp eu acredito que sempre será o mesmo mas a senha e o usuário mudam aqui dentro ai na hora de criar o lote e for indo a pessoa selecionar o CANAL DE SAIDA mas deixar o "notifica" como padrão que é o que temos hoje no .env e ao proceguir confimar com um modal bonito e organizado informando que vai sair por aquele canal e a responder será por...
+- poder escolher o responder pois pode ser que eles mandem por um canal e respondam por outro como o exemplo acima que você já fez, mas estou só lembrando que talvez seja bom poder escolher a saida ee depois o responder para fica até mais intuitivo!
+
+10. precisamos agora planejar e pensar em mais uma coisa que vamos precisar ASSINATURA de documento ou seja vamos ter mais um módulo de envio é envio de documento, contrato e etc tudo o que tiver para assinatura ou seja lá quando for criar se for esse muda ai sim somente pdf que acho que é mais fácil e se possível a pessoa marcar onde ela quer a assinatura no email da gaulke e dos RESPONSAVEIS que ela indicar.... 
+tipo um sistema de assinaturas digital ao todos assinarem disponibilizar o arquivo compleo de assinatura disparando novo email informando que o documento foi assinado por todos já com ele assinado, bonito organizado com assinatura digital pode criar deixar bonito sempre com a mesma fornte e etc 
+
+se possível deixar lá em configurações permitir inserir o certifgicado pfx acho da gaulke para poder assinar o documetno e ele tem senha ou sem senha ai permita e permita o teste para saber se está tudo ok salvar no disco o arquivo e a senha no banco 
+
+ou seja é um sistma de assinatura digital completo esse possivelmente será usado pelo societario para permitir assinatura de documento
+
+11. na mesma intensão o societário precisa enviar email pedindo documentos ai o que queriamos é uma tela que abrir com checlliskt para quem cadastra e recebe com os arquivos e dizer se é obrigatorio ou não e ai sim trazer para a gaulke e guardar no disco esse o societário precisa pois eles precisam pedir documentos as pessoas
+
+são mudanças até grandes
+
+preciso que pense como engenheiro de software apresente melhorias, pode inovar aqui foi um breafing, pode me perguntar e aprensentar melhoreas features novas que não pensei tudo é bem vindo, não esqueça de relatórios
 
 
 
