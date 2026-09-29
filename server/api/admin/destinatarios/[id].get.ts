@@ -1,5 +1,6 @@
-import { eq, asc } from 'drizzle-orm'
-import { useDb, recipients, batches, events } from '../../../db'
+import { eq, asc, sql } from 'drizzle-orm'
+import { useDb, recipients, batches, events, envios } from '../../../db'
+import { temPapel } from '../../../utils/permissoes'
 import { linkAcesso } from '../../../utils/urls'
 
 /** Ficha individual: todos os eventos com IP, user-agent e horario. */
@@ -12,7 +13,15 @@ export default defineEventHandler(async event => {
         destinatario: recipients,
         loteNome: batches.nome,
         loteId: batches.id,
-        arquivoNome: batches.arquivoNome,
+        loteStatus: batches.status,
+        loteStartedAt: batches.startedAt,
+        loteExcluidoEm: batches.excluidoEm,
+        loteContaId: batches.contaId,
+        loteContaNome: batches.contaNome,
+        loteResponderPara: batches.responderPara,
+        // anexo individual: o arquivo desta pessoa; senao o do lote. Colunas
+        // qualificadas a mao (as duas tabelas tem arquivo_nome)
+        arquivoNome: sql<string | null>`coalesce(sys_mail_recipients.arquivo_nome, sys_mail_batches.arquivo_nome)`,
         assunto: batches.assuntoSnapshot,
         html: batches.htmlSnapshot
       })
@@ -21,7 +30,9 @@ export default defineEventHandler(async event => {
       .where(eq(recipients.id, id))
   )[0]
 
-  if (!linha) throw createError({ statusCode: 404, statusMessage: 'Destinatario nao encontrado' })
+  if (!linha || (linha.loteExcluidoEm && !temPapel(event.context.operador, 'admin'))) {
+    throw createError({ statusCode: 404, statusMessage: 'Destinatario nao encontrado' })
+  }
 
   const timeline = await useDb()
     .select()
@@ -29,9 +40,18 @@ export default defineEventHandler(async event => {
     .where(eq(events.recipientId, id))
     .orderBy(asc(events.createdAt), asc(events.id))
 
+  // cada e-mail que saiu (original + reenvios), para a secao "Envios" e para
+  // a tela separar a linha do tempo por envio
+  const historico = await useDb()
+    .select()
+    .from(envios)
+    .where(eq(envios.recipientId, id))
+    .orderBy(asc(envios.numero))
+
   return {
     ...linha,
     link: linkAcesso(linha.destinatario.token),
-    timeline
+    timeline,
+    envios: historico
   }
 })

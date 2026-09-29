@@ -100,13 +100,33 @@ situações em que disparar um comunicado seria, no mínimo, constrangedor.
 
 | Rota | O que faz |
 |---|---|
-| `/admin/lotes` | lista com busca, filtro por status e período, e ordenação |
-| `/admin/lotes/novo` | assistente: lista → PDF → e-mail → revisão |
-| `/admin/lotes/:id` | console de disparo **em tempo real** (SSE), pausar/retomar/reenviar falhas |
+| `/admin/lotes` | lista com busca, filtro por status e período, ordenação, **arquivar** (um ou vários) e "Mostrar arquivados" |
+| `/admin/lotes/novo` | assistente: lista → anexo → e-mail → revisão, com **"Sai por" / "Respostas para"** e modal de confirmação |
+| `/admin/lotes/:id` | console de disparo **em tempo real** (SSE), pausar/retomar/reenviar falhas, **reenvio individual e em massa**, lixeira |
 | `/admin/templates` | editor de HTML com preview visual e envio de teste |
 | `/admin/relatorio` | tabela filtrável + exportação CSV |
-| `/admin/destinatario/:id` | ficha individual com a timeline completa (IP, user-agent) |
+| `/admin/destinatario/:id` | ficha individual: **envios numerados** e a timeline completa (IP, user-agent) separada por envio |
+| `/admin/auditoria` | quem fez o quê (supervisor e admin) |
+| `/admin/lixeira` | lotes disparados que foram excluídos, com restaurar (admin) |
+| `/admin/configuracoes` | canais de saída, servidor SMTP padrão e acesso (admin) |
 | `/c/:token` | página do destinatário (pública, por token) |
+
+### Arquivar, lixeira e reenvio
+
+- **Arquivar** só tira o lote da lista principal: links, confirmação e download
+  continuam funcionando, e o relatório enxerga tudo. Não vale para lote
+  enviando ou agendado.
+- **Excluir** um lote nunca disparado apaga de vez (autor, supervisor ou admin).
+  Um lote **já disparado** vai para a **lixeira** (supervisor ou admin, motivo
+  obrigatório). Ele some das telas, do relatório e dos contatos, e os links
+  param de abrir, mas destinatários e eventos ficam guardados. O admin restaura.
+- **Reenviar** ("o cliente diz que não recebeu"): sai o mesmo e-mail, com o
+  **mesmo link e código**. Cada envio vira uma linha numerada em
+  `sys_mail_envios` (nº 1 = original), com quem reenviou, para qual endereço,
+  por qual canal e por quê.
+  - **Individual:** sai na hora e permite corrigir o e-mail.
+  - **Em massa** (selecionados, ou "quem não confirmou"): vai pela fila do lote,
+    respeitando o intervalo entre envios, e não conta de novo em "enviados".
 
 ## Configuração
 
@@ -355,20 +375,28 @@ npm run build && node .output/server/index.mjs
 
 ## LGPD
 
-- **Não** coletamos CPF/CNPJ. O token UUID já identifica o destinatário e o
-  aceite é comprovado por IP + user-agent + timestamp — princípio da
-  minimização (art. 6º, III).
+- CPF/CNPJ só entra quando o envio precisa dele (anexo individual, solicitação,
+  assinatura): é o que casa o arquivo com a pessoa e organiza a pasta do cliente.
+  O aceite é comprovado por token + IP + user-agent + horário — minimização
+  (art. 6º, III).
 - O e-mail e a landing informam explicitamente que acesso e download são
   registrados (transparência, art. 6º, VI).
 - IP é dado pessoal: aparece só na área autenticada, nunca em página pública.
-- Retenção declarada ao titular: **24 meses**. O expurgo ainda é manual —
-  veja "Pendências".
+- Retenção declarada ao titular: **24 meses**, cumprida pela rotina diária de
+  retenção (veja "Retenção de dados").
 
-## Contas de envio
+## Contas de envio (canais de saída)
 
-O SMTP saiu do `.env` e virou cadastro, em **Configurações**. O servidor
-costuma ser o mesmo para todo mundo — por isso ele já vem pré-preenchido — mas
-usuário e senha mudam por setor, e **cada lote escolhe de qual conta sai**.
+O SMTP saiu do `.env` e virou cadastro, em **Configurações → Canais de saída**
+(só admin). O servidor costuma ser o mesmo para todo mundo, então ele fica em
+**Servidor SMTP padrão** (`sys_mail_config.smtp_servidor_padrao`) e o canal novo
+já nasce com ele. Usuário e senha mudam por setor, e **cada lote escolhe de qual
+canal sai** e **para onde vão as respostas** (`sys_mail_batches.responder_para`,
+que vira o `Reply-To` e o destino do recibo de leitura).
+
+O teste do canal também confere **SPF, DKIM e DMARC** do domínio do remetente.
+É só aviso, nunca bloqueia. O disparo confere o **canal do lote**, e não mais o
+`NUXT_SMTP_ENABLED` do `.env`.
 
 Na primeira execução a conta do `.env` é importada sozinha, já como padrão, e
 passa a ser editável pela tela. Ninguém precisa recadastrar o que já
@@ -420,10 +448,209 @@ excluída depois, o relatório continua dizendo de qual caixa aquele e-mail saiu
 Excluir uma conta com lote em andamento, pausado ou agendado é recusado — cortar
 as credenciais no meio de um disparo transformaria o resto da lista em erro.
 
+## Painel inicial, relatórios e dossiê
+
+- **Início** (`/admin`), com o período em dias de Brasília:
+  - e-mails enviados, % que confirmou a leitura, **mediana** do tempo até
+    confirmar, prováveis leituras, respostas e devoluções;
+  - o gráfico diário de envios e confirmações, que também pode ser visto em
+    tabela;
+  - **alertas**: canal falhando, caixa sem leitura, chamados com erro, lote
+    pausado pelo sistema e agendamentos das próximas 24 h;
+  - **"Minhas pendências"**: falhas, rascunhos, devoluções e falta de
+    confirmação nos lotes que a pessoa criou.
+- **Relatório → Resumo:**
+  - o funil (enviados → leituras → acessos → confirmações → downloads) por
+    lote, por quem criou, por **setor** (cadastro do painel) e por canal;
+  - **quem nunca confirma** (2 ou mais envios sem nenhuma confirmação);
+  - **devoluções por domínio**;
+  - **Exportar XLSX**, com uma aba para cada visão. A lista de destinatários
+    também exporta em XLSX, além do CSV.
+- **Dossiê de comprovação (PDF)**, por destinatário ou por lote. É o que se
+  apresenta quando o cliente diz "nunca recebi". Traz:
+  - os dados do envio, os marcos e cada envio numerado (Message-ID e resposta
+    do servidor);
+  - a linha do tempo com data, hora (Brasília), IP e navegador;
+  - o texto do e-mail como a pessoa recebeu e o **SHA-256** do HTML enviado;
+  - um **código de verificação**: gerar de novo a partir dos mesmos registros
+    dá o mesmo código.
+
+  Gerar um dossiê fica na auditoria (LGPD).
+
+## Assinatura digital
+
+Em **Assinaturas** a Gaulke envia um PDF para uma ou mais pessoas assinarem
+eletronicamente (em paralelo ou em sequência). Cada uma recebe um link pessoal
+(`/a/<token>`), lê o documento, digita o nome ou desenha a assinatura e confirma com um
+**código de 6 dígitos enviado ao e-mail**. Ninguém precisa de certificado digital.
+
+- **Campos no PDF**: assinatura, rubrica, data e nome, arrastados sobre as páginas. Sem
+  campo, a assinatura aparece só na folha de assinaturas.
+- **PDF final**: assinaturas nos campos, carimbo em cada página e uma **folha de
+  assinaturas** (hash do original, quem assinou, quando, IP, dispositivo, QR de
+  validação e histórico). Vai por e-mail a todos e fica na pasta do cliente.
+- **Selo da Gaulke** (opcional, "Assinar como Gaulke"): o PDF final recebe a assinatura
+  digital **PAdES** com o certificado A1 da empresa. Sem carimbo do tempo: a hora é a do
+  servidor (Brasília).
+- **Validação pública** em `/validar`: pelo código da folha ou arrastando o PDF (só o
+  hash sai do navegador).
+- **Histórico encadeado por hash**: alterar ou apagar um registro aparece como "alterado"
+  na tela.
+
+### Certificado A1 (Configurações → Certificado digital, só admin)
+
+Envie o `.pfx`/`.p12` e a senha. **Testar a senha** confere sem gravar nada e mostra
+titular, CNPJ, responsável, validade e cadeia. Ao cadastrar, a chave privada é guardada
+**cifrada** no banco (com a `SMTP_CRYPTO_KEY`) e a **senha é descartada** — não fica
+arquivo em disco nem senha em lugar nenhum. **Assinar PDF de teste** baixa um PDF selado
+para abrir no Adobe Reader ou em validar.iti.gov.br. Perder a `SMTP_CRYPTO_KEY` inutiliza
+o certificado cadastrado (basta cadastrar de novo). Alerta no Início quando faltar
+30 dias para vencer.
+
+> Nunca deixe o `.pfx` dentro da pasta do projeto: `cert/`, `*.pfx` e `*.p12` estão no
+> `.gitignore` e no `.dockerignore`, mas o caminho certo é só a tela de cadastro.
+
+## Solicitação de documentos
+
+Em **Solicitações** a Gaulke pede documentos a um ou mais clientes. Cada cliente recebe um
+e-mail com um link pessoal (`/r/<token>`) onde envia **item por item** — do computador ou
+tirando foto pelo celular — ou marca "Não possuo" com uma justificativa.
+
+- **Modelos de checklist** (Abertura de empresa, Alteração contratual, Admissão, IRPF já
+  vêm prontos) com itens obrigatórios/opcionais, formatos aceitos, quantidade e arquivo
+  modelo para o cliente preencher. Qualquer um cria; modelo já usado só é arquivado por
+  supervisor/admin.
+- **Análise**: aprovar, recusar com motivo (o botão *Avisar o cliente* manda um e-mail só
+  com tudo o que foi recusado) ou aceitar o "não possuo". Com todo obrigatório resolvido
+  a solicitação conclui sozinha e o cliente recebe o "recebemos tudo".
+- **Arquivos** no volume `documentos`, por cliente:
+  `clientes/<CPF-ou-CNPJ>_<nome>/<ano>/SOL-000123_<título>/01-<item>/`, com SHA-256.
+  Download só pela área autenticada (fica na auditoria), um a um ou em **ZIP** com
+  manifesto.
+- **Antivírus**: tudo o que o cliente envia passa pelo ClamAV (serviço `clamav` do
+  `docker-compose.yml`). Com ele fora do ar, o arquivo espera na quarentena e é
+  verificado quando ele voltar; a barra do admin mostra o aviso "antivírus". Sem
+  `CLAMAV_HOST` (desenvolvimento) o arquivo passa marcado como "sem antivírus".
+- **Lembretes** automáticos (a cada 3 dias, até 3, em dia útil) e manuais; quem pediu é
+  avisado por e-mail quando o cliente termina de entregar.
+
+Variáveis: `DOCUMENTOS_DIR` (padrão `./storage/documentos`), `CLAMAV_HOST`,
+`CLAMAV_PORT` (3310). O compose já liga o app ao `clamav` pela rede interna.
+
+## Anexo individual (um arquivo para cada destinatário)
+
+No passo 2 do novo envio há três modos: **sem anexo** (comunicado), **um
+arquivo para todos**, e **um arquivo para cada destinatário**, para guia DAS,
+holerite ou informe, em que cada cliente recebe o seu.
+
+No modo individual sobem vários arquivos, ou ZIPs, em
+[`/api/admin/upload-individual`](server/api/admin/upload-individual.post.ts).
+Cada arquivo passa pela mesma conferência do anexo único (formato e conteúdo
+real), e o que não passa volta listado com o motivo. ZIPs são abertos no
+servidor com teto de 25 MB por arquivo e 400 MB por envio, conferido **antes**
+de descompactar (proteção contra ZIP-bomba). A tela sobe em pacotes de até
+~24 MB, porque o proxy recusa requisições acima de 30 MB.
+
+**Casamento arquivo ↔ destinatário**
+([`shared/utils/casamento.ts`](shared/utils/casamento.ts)), pelo **nome do
+arquivo**:
+1. o **CPF/CNPJ**, com ou sem pontuação (`DAS_12.345.678-0001-90.pdf`);
+2. o **e-mail** do destinatário;
+3. o **nome ou a empresa idêntico**. Só idêntico, e só se não for ambíguo.
+
+O que sobrar é ligado à mão. Quem ficar sem arquivo só segue com "enviar sem
+anexo para quem ficou sem arquivo". O CPF/CNPJ entra pela coluna da planilha
+(sugerida automaticamente), pelo cadastro do cliente ("Do sistema") ou pelos
+envios anteriores ("Do banco"). Fica gravado só com dígitos em
+`sys_mail_recipients.documento`.
+
+Cada destinatário guarda o **próprio** arquivo (`arquivo_path`/`arquivo_nome`).
+A página `/c/<token>` e o download entregam o arquivo **dele**, ou o do lote,
+quando não houver um próprio.
+
+## Monitor da caixa e chamados no painel
+
+"Enviado" só quer dizer que o **nosso** servidor aceitou a mensagem. O que
+acontece depois (devolução, recibo de leitura, resposta do cliente) chega como
+e-mail na caixa do canal. Com **"Monitorar a caixa de entrada"** ligado no
+canal, [`server/utils/caixa/monitor.ts`](server/utils/caixa/monitor.ts) lê essa
+caixa por IMAP a cada 2 minutos.
+
+**Só lê.** A caixa é aberta em modo somente leitura (EXAMINE): nada é marcado
+como lido, movido ou apagado. Quem usa a caixa no Outlook não percebe
+diferença. Na primeira leitura olha os últimos 30 dias; depois, só o que
+chegou após o último UID.
+
+| Chega na caixa | Vira |
+|---|---|
+| Devolução definitiva (5.x.x, "erro permanente") | destinatário **devolvido**, evento e **lista de supressão** |
+| Atraso de entrega (4.x.x, "entrega adiada") | evento |
+| Recibo de leitura (MDN) | evento e "recibo de leitura" na ficha |
+| Resposta automática (férias) | evento, **sem** chamado |
+| Aviso do servidor (postmaster) | só aparece na Caixa |
+| Resposta do cliente | evento com o trecho escrito (sem a citação) e **chamado no painel** |
+
+O servidor da empresa é o **S4 (qmail)**, que escreve as devoluções em
+português com o cabeçalho original colado no corpo. O classificador
+([`classificar.ts`](server/utils/caixa/classificar.ts)) entende esse formato e o
+padrão (RFC 3464/8098).
+
+**Como liga ao envio.** Todo envio sai com `Message-ID` próprio
+(`<GLK-XXXX-XXXX.lote.aleatório@domínio>`). A resposta volta com ele em
+`In-Reply-To`, e a devolução traz o cabeçalho original. Na falta desses, valem
+o código GLK (no `X-Gaulke-Codigo`, no assunto ou no corpo) e o link `/c/<token>`
+citado. O que não liga a envio nenhum fica como **sem vínculo**, e dessas
+mensagens só remetente e assunto são guardados. A caixa do notifica@ é
+compartilhada com produção e com o painel, então muita coisa ali é legitimamente
+"sem vínculo".
+
+**Chamados no painel** (com "Abrir chamados no painel" no canal, ajustável por
+lote), sempre em nome de **quem criou o lote**:
+- **resposta do cliente**: um chamado por ocorrência. Se o mesmo cliente
+  responder de novo com o chamado aberto, vira comentário;
+- **sem confirmação em N dias** (N no canal): um chamado por lote, com quem
+  falta confirmar.
+
+Os chamados passam por uma fila (`sys_mail_tickets`) com novas tentativas, e o
+painel pode estar fora do ar na hora. A integração usa a rota
+`/api/integracoes/comunica/*` do painel e um token de API `gk_`, configurados em
+**Configurações → Integração com o painel** (token cifrado) ou por
+`PAINEL_API_URL`/`PAINEL_API_TOKEN`.
+
+**Supressão.** Endereço que devolveu definitivamente sai dos próximos envios e
+dos reenvios, porque mandar de novo só gera outra devolução e piora a entrega de
+todos. Para reenviar, corrige-se o e-mail. Supervisor e admin tiram endereços
+da lista na tela **Caixa → Supressão**.
+
+**Antes de enviar**, o novo envio e o reenvio conferem o **domínio** de cada
+destinatário. Um domínio sem MX (não recebe e-mail) ou parecido com um conhecido
+("contabilgualke" → "contabilgaulke") gera aviso, com um botão para corrigir.
+
+### Respostas de solicitações e assinaturas
+
+O monitor também reconhece o que volta dos e-mails de **solicitação** e de
+**assinatura** — pelo Message-ID (`<SOL-000123.…>`, `<ASS-000045.…>`), pelos
+cabeçalhos `X-Gaulke-Solicitacao`/`X-Gaulke-Assinatura` do original numa
+devolução, pelo link `/r/…` ou `/a/…` citado, ou pelo código no assunto (este
+último só quando quem escreveu é o próprio cliente ou signatário). Efeitos:
+
+- **resposta**: evento no histórico da solicitação/assinatura, com o trecho, e
+  aviso por e-mail a quem pediu (se a resposta caiu numa caixa que não é a
+  dele); webhook `solicitacao.respondida`;
+- **devolução definitiva**: o endereço entra na supressão, a solicitação ou o
+  signatário fica marcado "Devolvido: …" e quem pediu é avisado para corrigir
+  e reenviar;
+- automática, recibo e atraso: só o evento.
+
+Na Caixa de entrada, a mensagem aparece ligada à solicitação ou à assinatura.
+
 ## Entrada pela sessão do painel
 
-Quem já está logado no painel (`gaulke-data-tools-ts`) **entra sem senha**, e o
-lote passa a registrar quem o criou e quem o disparou.
+Quem já está logado no painel (`gaulke-data-tools-ts`) **entra sem senha**. **Todo
+usuário ativo** do painel tem acesso. O papel (administrador, supervisor, usuário)
+limita só as ações, e **toda ação fica na auditoria** (`sys_mail_auditoria`, tela
+**Auditoria**). A visão geral, as permissões e o plano estão em
+[GAULKE-COMUNICA.md](GAULKE-COMUNICA.md).
 
 Funciona porque o painel grava o cookie `gaulke_auth_session` com
 `Domain=contabilgaulke.com.br` — o navegador já o envia para este subdomínio
@@ -433,10 +660,29 @@ banco** que este app usa. Então basta calcular o hash e procurar a linha viva
 
 | Situação | O que acontece |
 |---|---|
-| Sessão do painel, admin ou supervisor | entra sem senha, autoria registrada |
-| Sessão do painel, usuário comum | **403** — disparo é restrito (13 podem, 33 não) |
-| Sessão expirada ou inválida | mensagem específica, e a senha continua valendo |
-| Sem cookie (ex.: acesso por IP) | pede a senha do `.env`, como antes |
+| Sessão do painel, qualquer usuário ativo | entra sem senha, com o papel dele, e tudo fica auditado |
+| Sessão expirada ou inválida | mensagem específica, com o botão para abrir o painel |
+| Sem cookie (ex.: acesso por IP) | **acesso de emergência** pela senha do `.env`, se ligado |
+
+**Senha local = emergência.** Ela opera como administrador, sem identificar a
+pessoa, e aparece na auditoria como "Acesso por senha local". O admin liga e
+desliga em **Configurações → Acesso** (`sys_mail_config.senha_local_habilitada`).
+Desligar derruba também quem já está dentro por ela. Quem entrou pela senha não
+pode desligá-la, para não trancar o sistema com o painel fora do ar.
+
+| Ação | Usuário | Supervisor | Admin |
+|---|:-:|:-:|:-:|
+| Criar, disparar, pausar, agendar lote | ✅ | ✅ | ✅ |
+| Excluir lote nunca disparado | o autor | ✅ | ✅ |
+| Excluir lote já disparado | ❌ | ✅ | ✅ |
+| Criar e editar template | ✅ | ✅ | ✅ |
+| Excluir template já usado em envio | ❌ | ✅ | ✅ |
+| Ver auditoria | ❌ | ✅ | ✅ |
+| Canais de saída (contas SMTP) e Configurações | ❌ | ❌ | ✅ |
+
+As regras são conferidas **no servidor** (`exigirPapel`, em
+[`server/utils/permissoes.ts`](server/utils/permissoes.ts)). A tela só esconde o
+que a pessoa não pode fazer.
 
 **Validação pelo banco, não por segredo compartilhado.** Não precisamos do
 `authJwtSecret` do painel, e o logout tem efeito **imediato**: quando o painel
@@ -458,8 +704,11 @@ distinguindo "sem cookie" de "cookie não reconhecido".
 
 O template é montado com **blocos**, não escrito em HTML: logo, título,
 parágrafo, aviso destacado, lista, botão, código, imagem, separador e rodapé.
-A pessoa arrasta para reordenar, escreve em campos comuns e insere `{{nome}}`
-clicando numa etiqueta — a variável entra na posição do cursor.
+A pessoa arrasta para reordenar, escreve em campos comuns e insere dados do
+cliente clicando em botões com nome de gente ("Nome do cliente", "Empresa",
+"Código do envio"). O sistema escreve `{{nome}}` etc. na posição do cursor.
+Parágrafo, aviso e lista saem **justificados** por padrão, também no celular,
+e cada bloco pode escolher outro alinhamento.
 
 **Por que gerar o HTML em vez de deixar editar:** cliente de e-mail não é
 navegador. O Outlook ignora CSS moderno, então a marcação precisa ser tabela
@@ -486,6 +735,30 @@ A aba **HTML** mostra o resultado em somente-leitura (com as variáveis ainda no
 lugar) e oferece "Converter para HTML livre" — caminho de mão única, para quem
 quiser assumir a marcação. Templates escritos à mão continuam em modo `html` e
 não são migrados.
+
+### Templates para todos (assistente, oficial, versões)
+
+- **Assistente de criação** em 5 fases: ① o que vai enviar (**documento** ou
+  **comunicado**) → ② ponto de partida (básico ou **galeria de modelos por
+  setor**, em [`app/utils/galeria.ts`](app/utils/galeria.ts)) → ③ nome,
+  categoria e assunto (com sugestões) → ④ conteúdo → ⑤ revisão com checklist e
+  teste. O progresso fica salvo no navegador por 7 dias.
+- **Tipo** fica gravado (`sys_mail_templates.tipo`). "Documento" exige o botão
+  de acesso, no servidor também. "Comunicado" nasce com o botão "Confirmar
+  recebimento", que dá a prova de recebimento (sem ele, só o pixel, que é
+  estimativa).
+- **Oficial**: só supervisor e admin editam, arquivam, restauram ou excluem.
+  Os demais usam **Duplicar**, e a cópia é deles.
+- **Versões** (`sys_mail_template_versoes`): cada salvamento que muda algo
+  guarda uma cópia. "Restaurar" vira uma versão nova e não apaga nada.
+- **Arquivar** tira o template da lista e do novo envio sem apagar.
+  **Excluir** pede confirmação dupla (digitar o nome). Template já usado em
+  envio só é excluído por supervisor ou admin, e os demais recebem a opção de
+  arquivar.
+- A lista mostra tipo, categoria, "usado em N envios" e o cadeado de oficial,
+  com busca e filtro por categoria. O editor avisa quando há **dado
+  personalizado desconhecido** (`{{xyz}}` sem coluna correspondente na
+  planilha iria literal para o cliente).
 
 ## Busca e ordenação dos lotes
 
@@ -555,13 +828,111 @@ request, que é o que queremos evitar). Com mais de uma réplica cada uma tem se
 contador, e um restart zera tudo — aceitável, já que o objetivo é barrar loop e
 força bruta, não cobrar quota. Ajustáveis por `RATE_LIMIT_*`.
 
+## Listas de contatos
+
+**Mais → Listas.** Uma lista ("Clientes do Simples", "DP - folha") é montada uma
+vez — colando da planilha, digitando ou importando CSV/XLSX — e usada:
+
+- no **novo envio**, passo 1, origem **"Lista salva"** (ou o botão *Usar num
+  envio* na tela da lista, que abre `/admin/lotes/novo?lista=ID`);
+- na **nova solicitação**, botão **Lista salva** no passo "Para quem".
+
+O caminho inverso também existe: no passo 1 do novo envio, **Salvar como lista**
+guarda os destinatários montados ali. A lista é só um ponto de partida: o lote
+copia os contatos, e mudar a lista depois não altera o que já foi enviado.
+Contatos que já devolveram (supressão) aparecem marcados e ficam de fora dos
+envios. Qualquer usuário cria e edita; excluir é de quem criou, ou de
+supervisor/admin. Tudo auditado.
+
+## Lembrete automático nos comunicados
+
+No passo 4 do novo envio: **"Lembrar automaticamente quem não confirmar"**, a
+cada N dias (1–30), no máximo M vezes (1–5). O mesmo e-mail sai de novo, com
+**"Lembrete:"** no assunto e o **mesmo link e código**, pela fila do lote
+(respeita o intervalo). Só em dia útil, das 8h às 18h (São Paulo).
+
+- Precisa do botão de acesso no e-mail — é por ele que a pessoa confirma.
+- Ficam de fora: quem confirmou, quem devolveu, quem está na supressão, lote
+  arquivado ou na lixeira.
+- Cada lembrete é um envio numerado no histórico da pessoa (origem "lembrete")
+  e entra no dossiê. A tela do lote mostra quantos saíram e permite mudar ou
+  desligar.
+
+## Linha do tempo do cliente
+
+**Mais → Clientes.** Busca por nome, e-mail, empresa ou CPF/CNPJ e mostra, do
+mais recente ao mais antigo, tudo daquele cliente: comunicados (com o estado de
+cada um), solicitações de documentos, documentos para assinar e as respostas
+que ele mandou por e-mail. Começando por um e-mail, entram os CPF/CNPJ que já
+apareceram com ele; começando por um CNPJ, entram todos os e-mails ligados a ele
+(sócio, financeiro). As páginas do destinatário, da solicitação e da assinatura
+têm o atalho **Linha do tempo**.
+
+## Webhooks (n8n)
+
+**Configurações → Webhooks** (só admin). Cada webhook é uma URL (o nó *Webhook*
+do n8n, método POST) e a lista de eventos que ele ouve:
+
+| Evento | Quando |
+|---|---|
+| `lote.concluido` | o lote terminou o disparo (não repete em reenvio/lembrete) |
+| `comunicado.confirmado` | o destinatário confirmou o recebimento |
+| `comunicado.respondido` | o destinatário respondeu o e-mail (monitor da caixa) |
+| `comunicado.devolvido` | devolução definitiva (endereço inexistente) |
+| `solicitacao.entregue` | o cliente entregou os documentos obrigatórios |
+| `solicitacao.concluida` | solicitação concluída (automática ou manual) |
+| `solicitacao.respondida` | o cliente respondeu o e-mail do pedido |
+| `assinatura.assinada` / `.recusada` | um signatário assinou / recusou |
+| `assinatura.concluida` | todos assinaram (traz SHA-256, pasta e link de validação) |
+
+O corpo é JSON: `{ id, evento, ocorridoEm, origem, link, dados }`. O `id` é o
+mesmo em todas as tentativas da mesma entrega (use para descartar repetidas).
+
+**Segurança.** Cada entrega vai assinada:
+
+```
+X-Gaulke-Assinatura: sha256=HMAC_SHA256(segredo, X-Gaulke-Timestamp + "." + corpo)
+```
+
+O segredo (`whsec_…`) é mostrado **uma vez**, na criação (ou em *Gerar novo
+segredo*), e fica cifrado no banco com a `SMTP_CRYPTO_KEY`. No n8n, um nó
+*Crypto* (HMAC SHA256) confere a assinatura antes de seguir.
+
+**Entrega.** Os eventos entram numa fila no banco e o agendador entrega a cada
+30 s. Falhou (sem resposta em 10 s ou HTTP fora de 2xx): tenta de novo em 1 min,
+5 min, 15 min, 1 h, 3 h e 6 h, e desiste. A tela mostra o último erro, as
+entregas recentes, e reenvia a que desistiu. *Testar* manda um evento `teste`
+na hora. O payload leva nomes, e-mails e links — nunca o arquivo nem segredos.
+
+## Retenção de dados (LGPD)
+
+**Configurações → Retenção de dados** (só admin). Uma rotina diária (a partir
+das 2h, uma vez por dia, com trava para rodar numa instância só) apaga **de
+vez** o que passou do prazo:
+
+| O quê | Prazo padrão | Conta a partir de |
+|---|---|---|
+| Comunicados: lote, destinatários, eventos, envios, mensagens da caixa ligadas e o anexo (se nenhum outro lote usa) | 24 meses | última atividade do lote |
+| Solicitações: registros e a pasta com os arquivos do cliente | 24 meses | última atividade |
+| Documentos **assinados por todos** (PDFs e histórico) | 10 anos | conclusão |
+| Documentos para assinar recusados, cancelados ou abandonados | 24 meses (o dos comunicados) | última atividade |
+| Lote na **lixeira** | 90 dias | exclusão |
+| Mensagens da caixa sem vínculo | 24 meses | leitura |
+| Anexos que nenhum lote usa · PDFs temporários de assinatura e sobras da quarentena | 24 meses · 1 dia | arquivo |
+| Entregas de webhook encerradas | 90 dias | criação |
+
+A **auditoria fica** (é a prestação de contas da equipe); depois dos 24 meses só
+o IP e o navegador de quem agiu são apagados. Endereços na supressão ficam, para
+não voltarem a receber. Os prazos têm piso (6 meses, 5 anos para assinados, 7
+dias de lixeira) e a tela tem **"Ver o que sairia hoje"** (prévia, sem apagar) e
+**"Rodar agora"**. Cada execução com efeito vai para a auditoria, e o resumo da
+última aparece na tela. Desligar a retenção é possível, mas o rodapé dos e-mails
+promete 24 meses.
+
 ## Pendências conhecidas
 
-- **Bounces**: o status `bounce` existe no schema, mas não há coletor
-  (IMAP/webhook). Uma mensagem aceita pelo relay aparece como "enviado" mesmo
-  que volte depois.
-- **Expurgo de 24 meses**: prometido ao titular, ainda não automatizado.
-- **PDF por destinatário**: hoje é um arquivo por lote.
-- **Múltiplos operadores**: a autenticação é uma senha única compartilhada.
 - **Entregabilidade**: confira SPF, DKIM e DMARC do domínio antes de lotes
-  grandes; sem isso o intervalo de 10s não impede a queda em spam.
+  grandes (o teste do canal avisa); sem isso o intervalo entre envios não impede
+  a queda em spam.
+- **Portal do cliente** (um link com tudo que está pendente para a pessoa) e
+  **WhatsApp como canal** ficaram fora desta rodada.

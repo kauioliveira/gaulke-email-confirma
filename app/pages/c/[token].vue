@@ -181,7 +181,7 @@ const whatsapp = computed(() => {
                 variant="subtle"
                 icon="i-lucide-badge-check"
                 title="Leitura confirmada"
-                :description="`Registrado em ${new Date(data.confirmadoEm!).toLocaleString('pt-BR')}.`"
+                :description="`Registrado em ${formatarDataHora(data.confirmadoEm)} (horário de Brasília).`"
               />
 
               <div v-else class="space-y-4">

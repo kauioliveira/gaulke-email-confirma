@@ -1,5 +1,6 @@
 import { desc } from 'drizzle-orm'
 import { useDb, batches } from '../../../db'
+import { foraDaLixeira } from '../../../utils/lotes'
 
 /**
  * Lista enxuta para preencher combos ("filtrar por lote").
@@ -12,6 +13,7 @@ export default defineEventHandler(async () => {
   const lotes = await useDb()
     .select({ id: batches.id, nome: batches.nome, status: batches.status })
     .from(batches)
+    .where(foraDaLixeira)
     .orderBy(desc(batches.createdAt))
     .limit(500)
 

@@ -1,8 +1,9 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { useDb, recipients, batches } from '../../../db'
 import { registrarEventoDoRequest } from '../../../utils/tracking'
+import { foraDaLixeira } from '../../../utils/lotes'
 import { caminhoNoStorage } from '../../../utils/storage'
 import { mimeDoArquivo } from '../../../../shared/types/tipos-arquivo'
 
@@ -18,13 +19,17 @@ export default defineEventHandler(async event => {
       .select({
         id: recipients.id,
         confirmedAt: recipients.confirmedAt,
-        arquivoPath: batches.arquivoPath,
-        arquivoNome: batches.arquivoNome,
+        // anexo individual: o arquivo DESTA pessoa vale mais que o do lote. As
+        // colunas vao qualificadas a mao: as duas tabelas tem arquivo_path e
+        // arquivo_nome, e dentro de sql`` o drizzle pode escrever so o nome
+        arquivoPath: sql<string | null>`coalesce(sys_mail_recipients.arquivo_path, sys_mail_batches.arquivo_path)`,
+        arquivoNome: sql<string | null>`case when sys_mail_recipients.arquivo_path is not null
+          then sys_mail_recipients.arquivo_nome else sys_mail_batches.arquivo_nome end`,
         exigirConfirmacao: batches.exigirConfirmacao
       })
       .from(recipients)
       .innerJoin(batches, eq(batches.id, recipients.batchId))
-      .where(eq(recipients.token, token))
+      .where(and(eq(recipients.token, token), foraDaLixeira))
   )[0]
 
   if (!linha) throw createError({ statusCode: 404, statusMessage: 'Link invalido ou expirado' })

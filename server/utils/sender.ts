@@ -1,15 +1,19 @@
+import { randomBytes } from 'node:crypto'
 import { eq, sql, and } from 'drizzle-orm'
-import { useDb, useSql, batches, recipients, type Recipient, type Batch } from '../db'
+import { useDb, useSql, batches, recipients, type Recipient, type Batch, type ReenvioPendente } from '../db'
 import { enviarEmail, resolverConta, type ContaSmtp } from './mailer'
 import { renderizar, renderizarAssunto, versaoTexto } from './render'
 import { registrarEvento } from './tracking'
 import { useBatchBus } from './sse'
+import { registrarEnvio } from './envios'
+import { emitirWebhook } from './webhooks'
 
 const MAX_TENTATIVAS = 3
 /** Item preso em "enviando" por mais que isso volta para a fila (processo caiu no meio). */
 const LOCK_EXPIRA_MS = 5 * 60 * 1000
 
-type Worker = { batchId: number; parar: boolean }
+/** `originais`: envios de primeira vez nesta execucao (reenvio e lembrete nao contam) */
+type Worker = { batchId: number; parar: boolean; originais?: number }
 const workers = new Map<number, Worker>()
 
 export function loteEmExecucao(batchId: number) {
@@ -64,7 +68,8 @@ function normalizar(row: any): Recipient {
     dadosExtras: row.dados_extras ?? row.dadosExtras,
     ultimoErro: row.ultimo_erro ?? row.ultimoErro,
     messageId: row.message_id ?? row.messageId,
-    downloadCount: row.download_count ?? row.downloadCount
+    downloadCount: row.download_count ?? row.downloadCount,
+    reenvioPendente: row.reenvio_pendente ?? row.reenvioPendente ?? null
   }
 }
 
@@ -84,7 +89,13 @@ export async function destravarOrfaos(batchId?: number) {
   return r.length
 }
 
-async function enviarUm(lote: Batch, r: Recipient, conta: ContaSmtp) {
+/**
+ * Envia o e-mail do lote para UM destinatario, a partir do snapshot.
+ *
+ * Usado pelo worker e pelo reenvio individual: o reenvio sai exatamente como o
+ * original — mesmo conteudo, mesmo link, mesmo codigo.
+ */
+export async function enviarUm(lote: Batch, r: Recipient, conta: ContaSmtp) {
   const vars = {
     nome: r.nome,
     email: r.email,
@@ -94,8 +105,20 @@ async function enviarUm(lote: Batch, r: Recipient, conta: ContaSmtp) {
     dadosExtras: (r.dadosExtras as Record<string, unknown>) || null
   }
   const html = renderizar(lote.htmlSnapshot, vars)
-  const assunto = renderizarAssunto(lote.assuntoSnapshot, vars)
+  // lembrete automatico: mesmo e-mail, com o aviso no assunto
+  const lembrete = !!(r.reenvioPendente as ReenvioPendente | null)?.lembrete
+  const assunto = `${lembrete ? 'Lembrete: ' : ''}${renderizarAssunto(lote.assuntoSnapshot, vars)}`
   const texto = versaoTexto(vars, assunto)
+
+  /**
+   * Message-ID com o codigo e o lote dentro. A resposta do cliente volta com
+   * ele em In-Reply-To, e a devolucao traz o cabecalho original: e o que liga
+   * a mensagem ao envio certo, mesmo que ela passe por um servidor que descarte
+   * os nossos cabecalhos X-Gaulke-*. O sufixo aleatorio diferencia cada
+   * reenvio da mesma pessoa.
+   */
+  const dominio = /@([A-Za-z0-9.-]+)/.exec(conta.from)?.[1] ?? 'gaulke.local'
+  const messageId = `<${r.codigo}.${lote.id}.${randomBytes(6).toString('hex')}@${dominio}>`
 
   return enviarEmail({
     para: r.email,
@@ -105,7 +128,9 @@ async function enviarUm(lote: Batch, r: Recipient, conta: ContaSmtp) {
     // permite rastrear a mensagem no log do servidor SMTP
     headers: { 'X-Gaulke-Codigo': r.codigo, 'X-Gaulke-Lote': String(lote.id) },
     pedirRecibo: lote.pedirRecibo === 'true',
-    conta
+    conta,
+    responderPara: lote.responderPara,
+    messageId
   })
 }
 
@@ -134,8 +159,30 @@ async function processarLote(worker: Worker) {
           .set({ status: 'concluido', finishedAt: new Date() })
           .where(eq(batches.id, batchId))
         bus.emitBatch({ batchId, tipo: 'concluido', mensagem: 'Lote concluido' })
+        // so o disparo de verdade: uma rodada de reenvios ou lembretes nao
+        // "conclui o lote" de novo para quem ouve o webhook
+        if (worker.originais) {
+          await emitirWebhook(
+            'lote.concluido',
+            {
+              loteId: lote.id,
+              nome: lote.nome,
+              assunto: lote.assuntoSnapshot,
+              total: lote.total,
+              enviados: lote.enviados,
+              falhas: lote.falhas,
+              canal: lote.contaNome,
+              disparadoPor: lote.disparadoPorNome
+            },
+            `/admin/lotes/${lote.id}`
+          )
+        }
         break
       }
+
+      // pedido de reenvio pela fila ("reenviar para quem nao confirmou"): a
+      // pessoa ja recebeu antes, entao nao conta de novo em `enviados`
+      const reenvio = r.reenvioPendente as ReenvioPendente | null
 
       try {
         const info = await enviarUm(lote, r, conta)
@@ -147,44 +194,101 @@ async function processarLote(worker: Worker) {
             messageId: info.messageId,
             lockedAt: null,
             ultimoErro: null,
-            tentativas: r.tentativas + 1
+            tentativas: r.tentativas + 1,
+            reenvioPendente: null
           })
           .where(eq(recipients.id, r.id))
-        await registrarEvento(r.id, 'enviado', { meta: { messageId: info.messageId } })
 
-        const [c] = await db
-          .update(batches)
-          .set({ enviados: sql`${batches.enviados} + 1` })
-          .where(eq(batches.id, batchId))
-          .returning({ enviados: batches.enviados, falhas: batches.falhas, total: batches.total })
+        if (!reenvio) worker.originais = (worker.originais ?? 0) + 1
+        const numero = await registrarEnvio({
+          recipientId: r.id,
+          origem: reenvio?.lembrete ? 'lembrete' : reenvio ? 'reenvio' : 'lote',
+          para: r.email,
+          messageId: info.messageId,
+          contaId: conta.id,
+          contaNome: conta.nome,
+          responderPara: lote.responderPara,
+          status: 'enviado',
+          respostaSmtp: info.response,
+          motivo: reenvio?.motivo ?? null,
+          porUserId: reenvio ? reenvio.porUserId : lote.disparadoPorUserId,
+          porNome: reenvio ? reenvio.porNome : lote.disparadoPorNome
+        })
+        await registrarEvento(r.id, reenvio ? 'reenvio' : 'enviado', {
+          meta: {
+            messageId: info.messageId,
+            resposta: info.response,
+            envio: numero,
+            ...(reenvio ? { motivo: reenvio.motivo, por: reenvio.porNome } : {})
+          }
+        })
+
+        // conta como enviado so o que ainda nao tinha sido entregue: o envio
+        // original, ou o reenvio de quem estava em erro
+        const [c] =
+          !reenvio || reenvio.statusAnterior === 'erro'
+            ? await db
+                .update(batches)
+                .set({
+                  enviados: sql`${batches.enviados} + 1`,
+                  ...(reenvio ? { falhas: sql`greatest(${batches.falhas} - 1, 0)` } : {})
+                })
+                .where(eq(batches.id, batchId))
+                .returning({ enviados: batches.enviados, falhas: batches.falhas, total: batches.total })
+            : await db
+                .select({ enviados: batches.enviados, falhas: batches.falhas, total: batches.total })
+                .from(batches)
+                .where(eq(batches.id, batchId))
 
         bus.emitBatch({
           batchId,
-          tipo: 'enviado',
+          tipo: reenvio ? 'reenvio' : 'enviado',
           recipientId: r.id,
           email: r.email,
           codigo: r.codigo,
           status: 'enviado',
-          mensagem: info.response,
+          mensagem: reenvio ? `Reenvio nº ${numero}: ${info.response}` : info.response,
           ...c
         })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         const tentativas = r.tentativas + 1
         const desistiu = tentativas >= MAX_TENTATIVAS
+        // reenvio que nao saiu nao desfaz o envio anterior: a pessoa volta ao
+        // status que tinha (quem ja recebeu continua "enviado")
+        const statusFinal = reenvio ? reenvio.statusAnterior : 'erro'
         await db
           .update(recipients)
           .set({
-            status: desistiu ? 'erro' : 'pendente',
+            status: desistiu ? statusFinal : 'pendente',
             tentativas,
             ultimoErro: msg.slice(0, 1000),
-            lockedAt: null
+            lockedAt: null,
+            ...(desistiu ? { reenvioPendente: null } : {})
           })
           .where(eq(recipients.id, r.id))
-        await registrarEvento(r.id, 'erro', { meta: { erro: msg, tentativa: tentativas } })
+        await registrarEvento(r.id, 'erro', {
+          meta: { erro: msg, tentativa: tentativas, ...(reenvio ? { reenvio: true } : {}) }
+        })
+        if (desistiu && reenvio) {
+          await registrarEnvio({
+            recipientId: r.id,
+            origem: reenvio.lembrete ? 'lembrete' : 'reenvio',
+            para: r.email,
+            contaId: conta?.id ?? null,
+            contaNome: conta?.nome ?? null,
+            responderPara: lote.responderPara,
+            status: 'erro',
+            erro: msg,
+            motivo: reenvio.motivo,
+            porUserId: reenvio.porUserId,
+            porNome: reenvio.porNome
+          })
+        }
 
         let contagem = {}
-        if (desistiu) {
+        // falha de reenvio nao entra em `falhas`: quem ja recebeu nao virou falha
+        if (desistiu && !reenvio) {
           const [c] = await db
             .update(batches)
             .set({ falhas: sql`${batches.falhas} + 1` })
@@ -198,7 +302,7 @@ async function processarLote(worker: Worker) {
           recipientId: r.id,
           email: r.email,
           codigo: r.codigo,
-          status: desistiu ? 'erro' : 'pendente',
+          status: desistiu ? statusFinal : 'pendente',
           mensagem: desistiu ? msg : `${msg} (tentativa ${tentativas}, sera repetido)`,
           ...contagem
         })
@@ -222,6 +326,7 @@ export async function iniciarLote(batchId: number) {
   const db = useDb()
   const lote = (await db.select().from(batches).where(eq(batches.id, batchId)))[0]
   if (!lote) throw createError({ statusCode: 404, statusMessage: 'Lote nao encontrado' })
+  if (lote.excluidoEm) throw createError({ statusCode: 400, statusMessage: 'Este lote esta na lixeira' })
 
   await destravarOrfaos(batchId)
 

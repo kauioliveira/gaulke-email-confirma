@@ -199,6 +199,59 @@ export const TIPOS_IMAGEM: TipoArquivo[] = [
   }
 ]
 
+/**
+ * O que um CLIENTE pode enviar numa solicitacao de documentos: os mesmos
+ * formatos dos anexos, mais HEIC — a foto padrao do iPhone. A maioria dos
+ * navegadores converte para JPEG no upload, mas nem todos, e recusar a foto
+ * que a pessoa acabou de tirar do RG seria o pior momento para falhar.
+ */
+export const TIPOS_SOLICITACAO: TipoArquivo[] = [
+  ...TIPOS_ANEXO,
+  {
+    extensoes: ['.heic', '.heif'],
+    mime: 'image/heic',
+    rotulo: 'HEIC (foto do iPhone)',
+    familia: 'imagem',
+    // ISO-BMFF: "ftyp" + a marca, a partir do 5o byte
+    assinaturas: ['ftypheic', 'ftypheix', 'ftypmif1', 'ftypmsf1', 'ftyphevc'].map(m => ({ bytes: b(m), offset: 4 })),
+    icone: 'i-lucide-file-image'
+  },
+  {
+    extensoes: ['.webp'],
+    mime: 'image/webp',
+    rotulo: 'WEBP',
+    familia: 'imagem',
+    assinaturas: [{ bytes: b('WEBP'), offset: 8 }],
+    icone: 'i-lucide-file-image'
+  }
+]
+
+/** Familias que quem pede escolhe por item ("so PDF", "PDF ou foto"...). */
+export const FAMILIAS_SOLICITACAO: { valor: string; rotulo: string; icone: string }[] = [
+  { valor: 'PDF', rotulo: 'PDF', icone: 'i-lucide-file-text' },
+  { valor: 'imagem', rotulo: 'Foto / imagem', icone: 'i-lucide-image' },
+  { valor: 'Word', rotulo: 'Word', icone: 'i-lucide-file-type' },
+  { valor: 'Excel', rotulo: 'Excel', icone: 'i-lucide-file-spreadsheet' },
+  { valor: 'OpenDocument', rotulo: 'OpenDocument', icone: 'i-lucide-file-type' },
+  { valor: 'PowerPoint', rotulo: 'PowerPoint', icone: 'i-lucide-presentation' },
+  { valor: 'Texto', rotulo: 'Texto (.txt)', icone: 'i-lucide-file-text' },
+  { valor: 'CSV', rotulo: 'CSV', icone: 'i-lucide-table' },
+  { valor: 'ZIP', rotulo: 'ZIP', icone: 'i-lucide-file-archive' }
+]
+
+/** Tipos aceitos num item. Nenhuma familia marcada = qualquer formato da lista. */
+export function tiposDoItem(familias: string[]) {
+  if (!familias.length) return TIPOS_SOLICITACAO
+  return TIPOS_SOLICITACAO.filter(t => familias.includes(t.familia))
+}
+
+/** "PDF ou Foto / imagem" — para a instrucao ao cliente. */
+export function descreverFamilias(familias: string[]) {
+  if (!familias.length) return 'qualquer formato'
+  const rotulos = familias.map(f => FAMILIAS_SOLICITACAO.find(x => x.valor === f)?.rotulo ?? f)
+  return rotulos.length === 1 ? rotulos[0]! : `${rotulos.slice(0, -1).join(', ')} ou ${rotulos[rotulos.length - 1]}`
+}
+
 /** Extensao em minusculas, com o ponto. '' quando nao ha. */
 export function extensaoDe(nome: string) {
   const m = /\.[A-Za-z0-9]+$/.exec(nome.trim())

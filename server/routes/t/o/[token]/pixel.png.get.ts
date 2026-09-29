@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
-import { useDb, recipients } from '../../../../db'
+import { and, eq } from 'drizzle-orm'
+import { useDb, recipients, batches } from '../../../../db'
 import { registrarAbertura } from '../../../../utils/tracking'
+import { foraDaLixeira } from '../../../../utils/lotes'
 
 // PNG 1x1 totalmente transparente
 const PIXEL = Buffer.from(
@@ -46,7 +47,9 @@ export default defineEventHandler(async event => {
       await useDb()
         .select({ id: recipients.id, sentAt: recipients.sentAt })
         .from(recipients)
-        .where(eq(recipients.token, token))
+        .innerJoin(batches, eq(batches.id, recipients.batchId))
+        // lote na lixeira: a imagem continua saindo, so nao registra
+        .where(and(eq(recipients.token, token), foraDaLixeira))
     )[0]
     if (r) await registrarAbertura(event, r)
   } catch (e) {

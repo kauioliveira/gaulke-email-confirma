@@ -1,41 +1,47 @@
 import { sessaoValida } from '../../utils/auth'
-import { podeOperar, temCookieDoPainel, usuarioDaSessaoPainel } from '../../utils/sessao-painel'
+import { temCookieDoPainel, usuarioDaSessaoPainel } from '../../utils/sessao-painel'
+import { papelDe, OPERADOR_SENHA_LOCAL } from '../../utils/permissoes'
+import { lerConfig } from '../../utils/config'
 
 /**
- * Estado da autenticacao, para a tela decidir se pede senha.
+ * Estado da autenticacao, para a tela decidir o que mostrar.
  *
  * `origem` distingue de onde veio o acesso: pela sessao do painel (e entao
- * sabemos quem e) ou pela senha do .env (anonima). A tela de login usa isso
- * para nao pedir senha a quem ja esta logado no painel.
+ * sabemos quem e) ou pela senha local de emergencia. `papel` e o que a tela usa
+ * para esconder acoes — a regra de verdade continua no servidor, em
+ * exigirPapel(). `senhaLocal` diz se o formulario de senha deve aparecer.
  */
 export default defineEventHandler(async event => {
+  const senhaLocal = await lerConfig('senha_local_habilitada')
   const usuario = await usuarioDaSessaoPainel(event)
 
-  if (usuario && podeOperar(usuario)) {
+  if (usuario) {
     return {
       autenticado: true,
       origem: 'painel' as const,
-      usuario: { nome: usuario.nome, email: usuario.email, isAdmin: usuario.isAdmin },
+      senhaLocal,
+      usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, papel: papelDe(usuario) },
     }
   }
 
-  // Sessao valida mas sem permissao: a tela precisa dizer o motivo, senao a
-  // pessoa fica tentando a senha achando que errou.
-  if (usuario) {
+  if (senhaLocal && sessaoValida(event)) {
     return {
-      autenticado: false,
-      origem: 'painel-sem-permissao' as const,
-      usuario: { nome: usuario.nome, email: usuario.email, isAdmin: false },
+      autenticado: true,
+      origem: 'senha' as const,
+      senhaLocal,
+      usuario: {
+        id: null,
+        nome: OPERADOR_SENHA_LOCAL.nome,
+        email: null,
+        papel: OPERADOR_SENHA_LOCAL.papel,
+      },
     }
-  }
-
-  if (sessaoValida(event)) {
-    return { autenticado: true, origem: 'senha' as const, usuario: null }
   }
 
   return {
     autenticado: false,
     origem: temCookieDoPainel(event) ? ('painel-invalido' as const) : ('nenhuma' as const),
+    senhaLocal,
     usuario: null,
   }
 })

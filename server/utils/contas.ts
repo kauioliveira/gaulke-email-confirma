@@ -3,6 +3,7 @@ import { sql, eq, ne, and, asc } from 'drizzle-orm'
 import { useDb, accounts, type Account } from '../db'
 import { cifrar, chaveConfigurada } from './cripto'
 import { contaDoEnv, smtpConfig, type ContaSmtp } from './mailer'
+import { lerConfig, type ServidorSmtp } from './config'
 
 /** Campos que a tela envia. A senha e opcional na edicao: vazia = manter a atual. */
 export const contaSchema = z.object({
@@ -16,7 +17,14 @@ export const contaSchema = z.object({
   senha: z.string().max(500).optional(),
   remetente: z.string().min(1).max(300),
   responderPara: z.string().max(300).optional(),
-  padrao: z.boolean().default(false)
+  padrao: z.boolean().default(false),
+  // monitor da caixa (somente leitura) e chamados no painel
+  monitorarCaixa: z.boolean().default(false),
+  imapHost: z.string().trim().max(200).nullish(),
+  imapPort: z.number().int().min(1).max(65535).default(993),
+  imapSecure: z.boolean().default(true),
+  criarTickets: z.boolean().default(false),
+  diasSemConfirmacao: z.number().int().min(1).max(60).default(3)
 })
 
 export type DadosConta = z.output<typeof contaSchema>
@@ -45,6 +53,15 @@ export function serializar(a: Account) {
     ultimoTesteEm: a.ultimoTesteEm,
     ultimoTesteOk: a.ultimoTesteOk === null ? null : a.ultimoTesteOk === 'true',
     ultimoTesteMsg: a.ultimoTesteMsg,
+    monitorarCaixa: a.monitorarCaixa,
+    imapHost: a.imapHost,
+    imapPort: a.imapPort,
+    imapSecure: a.imapSecure,
+    criarTickets: a.criarTickets,
+    diasSemConfirmacao: a.diasSemConfirmacao,
+    imapUltimaLeituraEm: a.imapUltimaLeituraEm,
+    imapUltimoErro: a.imapUltimoErro,
+    imapUltimoErroEm: a.imapUltimoErroEm,
     criadoPorNome: a.criadoPorNome,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt
@@ -83,6 +100,12 @@ export function valoresParaBanco(d: DadosConta, senhaCifrada: string, criadoPorN
     remetente: d.remetente,
     responderPara: d.responderPara || null,
     padrao: String(d.padrao),
+    monitorarCaixa: d.monitorarCaixa,
+    imapHost: d.imapHost || null,
+    imapPort: d.imapPort,
+    imapSecure: d.imapSecure,
+    criarTickets: d.criarTickets,
+    diasSemConfirmacao: d.diasSemConfirmacao,
     ...(criadoPorNome ? { criadoPorNome } : {})
   }
 }
@@ -142,6 +165,24 @@ export async function importarContaDoEnv() {
     .returning()
 
   return criada ?? null
+}
+
+/**
+ * Servidor SMTP de partida para canais novos: o definido pelo admin em
+ * Configuracoes (sys_mail_config) ou, sem ele, o do .env.
+ */
+export async function servidorPadrao(): Promise<ServidorSmtp & { origem: 'config' | 'env' }> {
+  const c = await lerConfig('smtp_servidor_padrao')
+  if (c?.host) return { ...c, origem: 'config' }
+  const e = smtpConfig()
+  return {
+    host: e.host,
+    port: e.port,
+    secure: e.secure,
+    requireTls: e.requireTLS,
+    rejectUnauthorized: e.rejectUnauthorized,
+    origem: 'env'
+  }
 }
 
 /** Usada pelo /api/admin/status para a barra dizer qual conta esta em uso. */

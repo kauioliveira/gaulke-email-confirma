@@ -78,14 +78,18 @@ const OPCOES_MARCO = [
 
 const totalPaginas = computed(() => Math.max(1, Math.ceil((data.value?.total || 0) / filtros.porPagina)))
 
-function exportar() {
+function exportar(formato: 'csv' | 'xlsx' = 'csv') {
   // exporta exatamente o que esta filtrado na tela
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(consulta.value)) {
     if (v !== undefined && v !== '' && !['pagina', 'porPagina'].includes(k)) q.set(k, String(v))
   }
+  if (formato === 'xlsx') q.set('formato', 'xlsx')
   window.location.href = api(`/api/admin/relatorio/export?${q.toString()}`)
 }
+
+/** Resumo (funil, por usuário, setor, canal) ou a lista de destinatários. */
+const aba = ref<'resumo' | 'destinatarios'>(route.query.batchId ? 'destinatarios' : 'resumo')
 
 function limpar() {
   Object.assign(filtros, {
@@ -107,11 +111,33 @@ function pct(parte: number, total: number) {
         <h1 class="text-2xl font-semibold">Relatório de envios</h1>
         <p class="text-sm text-muted">Quem recebeu, acessou, confirmou a leitura e baixou o arquivo.</p>
       </div>
-      <div class="flex gap-2">
-        <UButton icon="i-lucide-refresh-cw" color="neutral" variant="outline" :loading="carregando === 'pending'" @click="refresh()" />
-        <UButton icon="i-lucide-download" label="Exportar CSV" color="neutral" variant="outline" @click="exportar" />
+      <div v-if="aba === 'destinatarios'" class="flex gap-2">
+        <UButton icon="i-lucide-refresh-cw" color="neutral" variant="outline" aria-label="Atualizar" :loading="carregando === 'pending'" @click="refresh()" />
+        <UButton icon="i-lucide-sheet" label="Exportar XLSX" color="neutral" variant="outline" @click="exportar('xlsx')" />
+        <UButton icon="i-lucide-download" label="CSV" color="neutral" variant="ghost" @click="exportar('csv')" />
       </div>
     </div>
+
+    <UFieldGroup>
+      <UButton
+        label="Resumo"
+        icon="i-lucide-chart-no-axes-column"
+        :color="aba === 'resumo' ? 'primary' : 'neutral'"
+        :variant="aba === 'resumo' ? 'solid' : 'outline'"
+        @click="aba = 'resumo'"
+      />
+      <UButton
+        label="Destinatários"
+        icon="i-lucide-users"
+        :color="aba === 'destinatarios' ? 'primary' : 'neutral'"
+        :variant="aba === 'destinatarios' ? 'solid' : 'outline'"
+        @click="aba = 'destinatarios'"
+      />
+    </UFieldGroup>
+
+    <RelatorioResumo v-if="aba === 'resumo'" />
+
+    <template v-else>
 
     <!-- Resumo -->
     <div v-if="data?.resumo" class="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
@@ -249,5 +275,6 @@ function pct(parte: number, total: number) {
         </div>
       </div>
     </UCard>
+    </template>
   </div>
 </template>

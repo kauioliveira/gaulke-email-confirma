@@ -76,7 +76,9 @@ export function sugerirMapeamento(colunas: string[], linhas: LinhaBruta[]) {
   return {
     email: email || '',
     nome: acha(['nome', 'name', 'razaosocial', 'cliente', 'contato', 'responsavel']) || '',
-    empresa: acha(['empresa', 'razaosocial', 'fantasia', 'company', 'organizacao']) || ''
+    empresa: acha(['empresa', 'razaosocial', 'fantasia', 'company', 'organizacao']) || '',
+    // CPF/CNPJ: e o que casa o arquivo individual com a pessoa
+    documento: acha(['cpfcnpj', 'cnpjcpf', 'cnpj', 'cpf', 'documento', 'inscricao']) || ''
   }
 }
 

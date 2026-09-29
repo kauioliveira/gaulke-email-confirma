@@ -2,6 +2,10 @@ import { useDb, accounts } from '../../../db'
 import { contaSchema, contaParaTeste, valoresParaBanco, rebaixarOutrasPadrao, serializar } from '../../../utils/contas'
 import { verificarConta } from '../../../utils/mailer'
 import { cifrar, chaveConfigurada } from '../../../utils/cripto'
+import { verificarDominio } from '../../../utils/dns-email'
+import { testarImap } from '../../../utils/caixa/monitor'
+import { exigirPapel } from '../../../utils/permissoes'
+import { auditar } from '../../../utils/auditoria'
 
 /**
  * Cria uma conta de envio.
@@ -11,6 +15,7 @@ import { cifrar, chaveConfigurada } from '../../../utils/cripto'
  * inteiro no meio do disparo.
  */
 export default defineEventHandler(async event => {
+  exigirPapel(event, 'admin', 'cadastrar canais de saída')
   if (!chaveConfigurada()) {
     throw createError({
       statusCode: 400,
@@ -24,6 +29,18 @@ export default defineEventHandler(async event => {
   const teste = await verificarConta(contaParaTeste(d, d.senha))
   if (!teste.ok) {
     throw createError({ statusCode: 400, statusMessage: `A conexao falhou, entao nada foi salvo: ${teste.mensagem}` })
+  }
+
+  // monitorar a caixa: a leitura tem que funcionar ANTES de salvar, senao o
+  // monitor so falharia em silencio a cada 2 minutos
+  if (d.monitorarCaixa) {
+    const imap = await testarImap({
+      host: d.host, imapHost: d.imapHost || null, imapPort: d.imapPort, imapSecure: d.imapSecure,
+      usuario: d.usuario, senhaCifrada: cifrar(d.senha), rejectUnauthorized: String(d.rejectUnauthorized)
+    })
+    if (!imap.ok) {
+      throw createError({ statusCode: 400, statusMessage: `A leitura da caixa (IMAP) falhou, então nada foi salvo: ${imap.mensagem}` })
+    }
   }
 
   const db = useDb()
@@ -40,5 +57,12 @@ export default defineEventHandler(async event => {
   if (!criada) throw createError({ statusCode: 500, statusMessage: 'Nao foi possivel criar a conta' })
   if (d.padrao) await rebaixarOutrasPadrao(criada.id)
 
-  return { conta: serializar(criada), teste }
+  await auditar(event, 'conta.criar', {
+    entidade: 'conta',
+    id: criada.id,
+    resumo: `Cadastrou o canal de saída "${criada.nome}" (${criada.remetente})`,
+    dados: serializar(criada)
+  })
+
+  return { conta: serializar(criada), teste: { ...teste, dns: await verificarDominio(criada.remetente) } }
 })

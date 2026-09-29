@@ -24,6 +24,13 @@ const LIMITES = {
   confirmar: num(process.env.RATE_LIMIT_CONFIRMAR, 10),
   arquivo: num(process.env.RATE_LIMIT_ARQUIVO, 20),
   pixel: num(process.env.RATE_LIMIT_PIXEL, 60),
+  // solicitacao de documentos: cada arquivo e uma requisicao (o cliente manda
+  // 30 fotos de nota de uma vez), mas cada uma e um upload de ate 25 MB
+  solicUpload: num(process.env.RATE_LIMIT_SOLIC_UPLOAD, 40),
+  solicAcao: num(process.env.RATE_LIMIT_SOLIC_ACAO, 30),
+  // assinatura: pedir codigo e assinar sao raros; validar e publico e sem token
+  assinAcao: num(process.env.RATE_LIMIT_ASSIN_ACAO, 12),
+  validar: num(process.env.RATE_LIMIT_VALIDAR, 20),
   // freio geral por IP: barra varredura de tokens sem punir uso legitimo
   porIp: num(process.env.RATE_LIMIT_IP, 200)
 }
@@ -43,6 +50,8 @@ function chave(prefixo: string, ip: string, token: string) {
 function extrairToken(path: string) {
   const m =
     path.match(/^\/api\/c\/([^/]+)/) ||
+    path.match(/^\/api\/r\/([^/]+)/) ||
+    path.match(/^\/api\/a\/([^/]+)/) ||
     path.match(/^\/t\/o\/([^/]+)\//)
   return m?.[1] ?? ''
 }
@@ -61,7 +70,10 @@ export default defineEventHandler(event => {
 
   const ehPixel = path.startsWith('/t/o/')
   const ehLanding = path.startsWith('/api/c/')
-  if (!ehPixel && !ehLanding) return
+  const ehSolic = path.startsWith('/api/r/')
+  const ehAssin = path.startsWith('/api/a/')
+  const ehValidar = path === '/api/validar'
+  if (!ehPixel && !ehLanding && !ehSolic && !ehAssin && !ehValidar) return
 
   const ip = clientIp(event) || 'desconhecido'
   const token = extrairToken(path)
@@ -85,6 +97,37 @@ export default defineEventHandler(event => {
      * apenas NAO registra a abertura.
      */
     if (!r.permitido) event.context.pularRegistro = true
+    return
+  }
+
+  if (ehValidar) {
+    // sem token: o freio e por IP (quem varre codigos bate aqui)
+    const r = consumir(`validar:${ip}`, LIMITES.validar, MINUTO)
+    if (!r.permitido) recusar(event, r.resetEmMs)
+    return
+  }
+
+  if (ehAssin) {
+    const leitura = event.method === 'GET'
+    const r = consumir(chave(leitura ? 'landing' : 'assin-acao', ip, token), leitura ? LIMITES.landing : LIMITES.assinAcao, MINUTO)
+    if (!r.permitido) recusar(event, r.resetEmMs)
+    return
+  }
+
+  if (ehSolic) {
+    const metodo = event.method
+    if (metodo === 'GET' && !path.endsWith('/modelo')) {
+      const r = consumir(chave('landing', ip, token), LIMITES.landing, MINUTO)
+      if (!r.permitido) recusar(event, r.resetEmMs)
+      return
+    }
+    const upload = metodo === 'POST' && path.endsWith('/arquivos')
+    const r = consumir(
+      chave(upload ? 'solic-upload' : 'solic-acao', ip, token),
+      upload ? LIMITES.solicUpload : LIMITES.solicAcao,
+      MINUTO
+    )
+    if (!r.permitido) recusar(event, r.resetEmMs)
     return
   }
 

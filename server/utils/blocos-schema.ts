@@ -16,11 +16,13 @@ import { z } from 'zod'
 const CAMINHO_IMAGEM = /^(?:(?:brand|img)\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 const alinhamento = z.enum(['esquerda', 'centro', 'direita'])
+// opcional: blocos gravados antes dele existir continuam validos (= justificado)
+const alinhamentoTexto = z.enum(['justificado', 'esquerda', 'centro']).optional()
 
 export const blocoSchema = z.discriminatedUnion('tipo', [
   z.object({ id: z.string(), tipo: z.literal('logo'), alinhamento }),
   z.object({ id: z.string(), tipo: z.literal('titulo'), texto: z.string().max(300) }),
-  z.object({ id: z.string(), tipo: z.literal('texto'), texto: z.string().max(4000) }),
+  z.object({ id: z.string(), tipo: z.literal('texto'), texto: z.string().max(4000), alinhamento: alinhamentoTexto }),
   z.object({ id: z.string(), tipo: z.literal('botao'), texto: z.string().min(1).max(80) }),
   z.object({
     id: z.string(),
@@ -32,9 +34,15 @@ export const blocoSchema = z.discriminatedUnion('tipo', [
     id: z.string(),
     tipo: z.literal('aviso'),
     texto: z.string().max(2000),
-    cor: z.enum(['neutro', 'atencao', 'alerta'])
+    cor: z.enum(['neutro', 'atencao', 'alerta']),
+    alinhamento: alinhamentoTexto
   }),
-  z.object({ id: z.string(), tipo: z.literal('lista'), itens: z.array(z.string().max(500)).max(30) }),
+  z.object({
+    id: z.string(),
+    tipo: z.literal('lista'),
+    itens: z.array(z.string().max(500)).max(30),
+    alinhamento: alinhamentoTexto
+  }),
   z.object({ id: z.string(), tipo: z.literal('separador') }),
   z.object({
     id: z.string(),

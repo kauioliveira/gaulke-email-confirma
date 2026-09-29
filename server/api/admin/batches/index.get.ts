@@ -1,6 +1,7 @@
-import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, gte, ilike, isNull, lte, or, sql, type SQL } from 'drizzle-orm'
 import { useDb, batches } from '../../../db'
 import { lotesEmExecucao } from '../../../utils/sender'
+import { foraDaLixeira } from '../../../utils/lotes'
 
 /**
  * Lista de lotes com busca, filtro e ordenacao no SERVIDOR.
@@ -35,8 +36,14 @@ export default defineEventHandler(async event => {
   const ate = String(q.ate || '').trim()
   const pagina = Math.max(1, Number(q.pagina || 1))
   const porPagina = Math.min(100, Math.max(5, Number(q.porPagina || 20)))
+  // arquivados ficam fora por padrao (item 3 do briefing); a lixeira, sempre
+  const mostrarArquivados = ['1', 'true', 'sim'].includes(String(q.arquivados || '').toLowerCase())
 
-  const cond: SQL[] = []
+  // condicoes de "quais lotes esta tela enxerga", comuns a lista e as contagens
+  const base: SQL[] = [foraDaLixeira]
+  if (!mostrarArquivados) base.push(isNull(batches.arquivadoEm))
+
+  const cond: SQL[] = [...base]
   if (status) cond.push(eq(batches.status, status))
 
   if (busca) {
@@ -51,8 +58,8 @@ export default defineEventHandler(async event => {
     )
   }
 
-  if (de) cond.push(gte(batches.createdAt, new Date(`${de}T00:00:00`)))
-  if (ate) cond.push(lte(batches.createdAt, new Date(`${ate}T23:59:59`)))
+  if (de) cond.push(gte(batches.createdAt, new Date(`${de}T00:00:00${DESLOCAMENTO_SP}`)))
+  if (ate) cond.push(lte(batches.createdAt, new Date(`${ate}T23:59:59.999${DESLOCAMENTO_SP}`)))
 
   const where = cond.length ? and(...cond) : undefined
   const db = useDb()
@@ -72,7 +79,17 @@ export default defineEventHandler(async event => {
   const porStatus = await db
     .select({ status: batches.status, n: sql<number>`count(*)::int` })
     .from(batches)
+    .where(and(...base))
     .groupBy(batches.status)
+
+  // quantos estao arquivados, para o filtro dizer o que esta escondido
+  const arquivados =
+    (
+      await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(batches)
+        .where(and(foraDaLixeira, sql`${batches.arquivadoEm} is not null`))
+    )[0]?.n ?? 0
 
   const ativos = new Set(lotesEmExecucao())
 
@@ -81,6 +98,7 @@ export default defineEventHandler(async event => {
     total,
     pagina,
     porPagina,
-    contagemPorStatus: Object.fromEntries(porStatus.map(s => [s.status, s.n])) as Record<string, number>
+    contagemPorStatus: Object.fromEntries(porStatus.map(s => [s.status, s.n])) as Record<string, number>,
+    arquivados
   }
 })

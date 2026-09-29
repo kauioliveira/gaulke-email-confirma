@@ -1,0 +1,39 @@
+import { and, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm'
+import { useDb, assinDocumentos, assinSignatarios } from '../../../db'
+import { operadorAtual } from '../../../utils/permissoes'
+import { resumoAssinatura } from '../../../utils/assinatura'
+
+/** Lista: status (aguardando por padrao), "so as minhas" e busca (titulo, ASS-…, quem assina). */
+export default defineEventHandler(async event => {
+  const op = operadorAtual(event)
+  const q = getQuery(event)
+  const status = String(q.status || 'aguardando')
+  const busca = String(q.busca || '').trim()
+  const cond: SQL[] = []
+  if (status !== 'todos') cond.push(eq(assinDocumentos.status, status))
+  if (q.minhas === '1' && op.id) cond.push(eq(assinDocumentos.criadoPorUserId, op.id))
+  if (busca) {
+    const cod = /^ass-?0*(\d+)$/i.exec(busca)
+    cond.push(
+      or(
+        ilike(assinDocumentos.titulo, `%${busca}%`),
+        ilike(assinDocumentos.clienteNome, `%${busca}%`),
+        sql`exists (select 1 from sys_mail_assin_signatarios s where s.documento_id = ${assinDocumentos.id}
+                     and (s.nome ilike ${`%${busca}%`} or s.email ilike ${`%${busca}%`}))`,
+        ...(cod ? [eq(assinDocumentos.id, Number(cod[1]))] : [])
+      )!
+    )
+  }
+  const db = useDb()
+  const docs = await db.select().from(assinDocumentos).where(cond.length ? and(...cond) : undefined).orderBy(desc(assinDocumentos.createdAt)).limit(200)
+  const sigs = docs.length ? await db.select().from(assinSignatarios).where(inArray(assinSignatarios.documentoId, docs.map(d => d.id))) : []
+  const [cont] = await db.execute<{ aguardando: number; concluido: number; recusado: number }>(sql`
+    select count(*) filter (where status = 'aguardando')::int as aguardando,
+           count(*) filter (where status = 'concluido')::int as concluido,
+           count(*) filter (where status = 'recusado')::int as recusado
+      from sys_mail_assin_documentos ${q.minhas === '1' && op.id ? sql`where criado_por_user_id = ${op.id}` : sql``}`)
+  return {
+    documentos: docs.map(d => resumoAssinatura(d, sigs.filter(s => s.documentoId === d.id).sort((a, b) => a.ordem - b.ordem))),
+    contadores: cont ?? { aguardando: 0, concluido: 0, recusado: 0 }
+  }
+})

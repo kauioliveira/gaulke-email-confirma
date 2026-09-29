@@ -205,6 +205,15 @@ export async function enviarEmail(opts: {
   pedirRecibo?: boolean
   /** conta ja resolvida; sem ela, resolve a padrao */
   conta?: ContaSmtp
+  /**
+   * "Respostas para" escolhido no lote. Sai por um canal e as respostas vao
+   * para outro endereco (o do setor, por exemplo). Vazio = o do proprio canal.
+   */
+  responderPara?: string | null
+  /** Message-ID proprio; sem ele, o nodemailer gera um */
+  messageId?: string
+  /** anexos (o PDF assinado vai para todos os signatarios) */
+  anexos?: { nome: string; conteudo: Buffer; tipo?: string }[]
 }) {
   const conta = opts.conta ?? (await resolverConta())
   if (!conta.enabled) {
@@ -214,15 +223,21 @@ export async function enviarEmail(opts: {
         : `Envio desabilitado: a conta "${conta.nome}" esta desativada`
     )
   }
-  const paraRecibo = conta.replyTo || conta.from
+  const replyTo = opts.responderPara || conta.replyTo
+  // o recibo de leitura vai para onde vao as respostas: e la que alguem olha
+  const paraRecibo = replyTo || conta.from
 
   const info = await transportador(conta).sendMail({
     from: conta.from,
-    replyTo: conta.replyTo || undefined,
+    replyTo: replyTo || undefined,
+    ...(opts.messageId ? { messageId: opts.messageId } : {}),
     to: opts.para,
     subject: opts.assunto,
     html: opts.html,
     text: opts.texto,
+    ...(opts.anexos?.length
+      ? { attachments: opts.anexos.map(a => ({ filename: a.nome, content: a.conteudo, contentType: a.tipo })) }
+      : {}),
     headers: {
       ...opts.headers,
       // os tres cabecalhos cobrem clientes diferentes: o padrao (RFC 8098),

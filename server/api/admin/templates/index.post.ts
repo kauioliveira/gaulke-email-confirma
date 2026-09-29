@@ -1,29 +1,16 @@
-import { z } from 'zod'
 import { useDb, templates } from '../../../db'
-import { blocosSchema } from '../../../utils/blocos-schema'
-import { renderizarBlocos } from '../../../utils/blocos'
-
-const schema = z.object({
-  nome: z.string().min(1).max(160),
-  assunto: z.string().min(1).max(300),
-  formato: z.enum(['blocos', 'html']).default('html'),
-  html: z.string().optional(),
-  blocos: blocosSchema.optional()
-})
+import { operadorAtual } from '../../../utils/permissoes'
+import { auditar } from '../../../utils/auditoria'
+import { templateSchema, htmlDoTemplate, exigirPodeMarcarOficial, salvarVersao } from '../../../utils/templates'
 
 export default defineEventHandler(async event => {
-  const dados = validar(schema, await readBody(event))
+  const op = operadorAtual(event)
+  const dados = validar(templateSchema, await readBody(event))
+  exigirPodeMarcarOficial(event, dados.oficial, false)
 
   // Em modo blocos o HTML e GERADO, nunca recebido: e isso que garante que a
   // marcacao de tabelas continue correta para o Outlook.
-  const html =
-    dados.formato === 'blocos'
-      ? renderizarBlocos(dados.blocos ?? [], dados.assunto)
-      : dados.html
-
-  if (!html) {
-    throw createError({ statusCode: 400, statusMessage: 'Informe o HTML ou os blocos' })
-  }
+  const html = htmlDoTemplate(dados)
 
   const [t] = await useDb()
     .insert(templates)
@@ -32,9 +19,24 @@ export default defineEventHandler(async event => {
       assunto: dados.assunto,
       formato: dados.formato,
       blocos: (dados.blocos ?? null) as never,
-      html
+      html,
+      tipo: dados.tipo ?? null,
+      categoria: dados.categoria || null,
+      oficial: dados.oficial ?? false,
+      criadoPorUserId: op.id,
+      criadoPorNome: op.nome,
+      atualizadoPorUserId: op.id,
+      atualizadoPorNome: op.nome
     })
     .returning()
+
+  await salvarVersao(t!, op)
+  await auditar(event, 'template.criar', {
+    entidade: 'template',
+    id: t!.id,
+    resumo: `Criou o template "${t!.nome}"${t!.tipo ? ` (${t!.tipo})` : ''}`,
+    dados: { nome: t!.nome, assunto: t!.assunto, formato: t!.formato, tipo: t!.tipo, categoria: t!.categoria }
+  })
 
   return { template: t }
 })

@@ -1,5 +1,6 @@
 import { and, desc, eq, ilike, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { useDb, recipients, batches } from '../../db'
+import { foraDaLixeira } from '../../utils/lotes'
 
 /**
  * Contatos ja conhecidos, para reaproveitar em um novo envio.
@@ -18,7 +19,8 @@ export default defineEventHandler(async event => {
   const marco = String(q.marco || '').trim()
   const limite = Math.min(5000, Math.max(1, Number(q.limite || 2000)))
 
-  const cond: SQL[] = []
+  // quem so esta num lote da lixeira nao aparece como contato
+  const cond: SQL[] = [foraDaLixeira]
   if (batchId) cond.push(eq(recipients.batchId, batchId))
   if (busca) {
     cond.push(
@@ -47,6 +49,8 @@ export default defineEventHandler(async event => {
       email: recipients.email,
       nome: recipients.nome,
       empresa: recipients.empresa,
+      // CPF/CNPJ do envio mais recente: e o que casa o anexo individual
+      documento: recipients.documento,
       loteNome: batches.nome,
       loteId: batches.id,
       sentAt: recipients.sentAt,

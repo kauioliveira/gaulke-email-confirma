@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ROTULOS_BLOCO, ICONES_BLOCO, ehBlocoFixo } from '~~/shared/types/blocos'
-import type { Bloco, TipoBloco } from '~~/shared/types/blocos'
+import type { AlinhamentoTexto, Bloco, TipoBloco } from '~~/shared/types/blocos'
 
 /**
  * Editor visual do e-mail.
@@ -31,15 +31,21 @@ const toast = useToast()
 const selecionado = ref<string | null>(null)
 const arrastando = ref<string | null>(null)
 
-const VARIAVEIS: { chave: string; rotulo?: string; desc: string }[] = [
-  { chave: '{{nome}}', desc: 'Nome do destinatário' },
-  { chave: '{{empresa}}', desc: 'Empresa do destinatário' },
-  { chave: '{{email}}', desc: 'E-mail do destinatário' },
-  { chave: '{{codigo}}', desc: 'Código único do envio' },
+/**
+ * Variáveis com nome de gente, e não de programador: quem monta o e-mail
+ * clica em "Nome do cliente" e o sistema escreve {{nome}} no lugar certo. O
+ * código aparece no tooltip, com um exemplo do que ele vira.
+ */
+const VARIAVEIS: { chave: string; rotulo: string; icone: string; desc: string }[] = [
+  { chave: '{{nome}}', rotulo: 'Nome do cliente', icone: 'i-lucide-user', desc: '{{nome}} — vira, por exemplo, "Maria Oliveira"' },
+  { chave: '{{empresa}}', rotulo: 'Empresa', icone: 'i-lucide-building-2', desc: '{{empresa}} — vira, por exemplo, "Empresa Exemplo LTDA"' },
+  { chave: '{{email}}', rotulo: 'E-mail do cliente', icone: 'i-lucide-at-sign', desc: '{{email}} — o endereço de quem recebe' },
+  { chave: '{{codigo}}', rotulo: 'Código do envio', icone: 'i-lucide-hash', desc: '{{codigo}} — código único, ex.: GLK-7F3K-2M9Q' },
   {
-    chave: '{{#empresa}}texto{{/empresa}}',
-    rotulo: '{{#empresa}}…{{/empresa}}',
-    desc: 'Trecho opcional: só aparece se a empresa do destinatário estiver preenchida (troque "texto" pelo conteúdo)'
+    chave: '{{#empresa}}, da {{empresa}}{{/empresa}}',
+    rotulo: 'Trecho só se tiver empresa',
+    icone: 'i-lucide-braces',
+    desc: '{{#empresa}}…{{/empresa}} — o trecho entre as marcas só aparece quando a empresa do cliente estiver preenchida na lista'
   }
 ]
 
@@ -60,6 +66,13 @@ const CORES_AVISO = [
   { label: 'Neutro', value: 'neutro' },
   { label: 'Atenção (amarelo)', value: 'atencao' },
   { label: 'Alerta (vermelho)', value: 'alerta' }
+]
+
+/** Texto corrido: justificado é o padrão da comunicação da empresa. */
+const ALINHAMENTOS_TEXTO = [
+  { label: 'Justificado', value: 'justificado', icon: 'i-lucide-align-justify' },
+  { label: 'Esquerda', value: 'esquerda', icon: 'i-lucide-align-left' },
+  { label: 'Centro', value: 'centro', icon: 'i-lucide-align-center' }
 ]
 
 const ALINHAMENTOS = [
@@ -127,11 +140,11 @@ function criar(tipo: TipoBloco): Bloco {
   switch (tipo) {
     case 'logo': return { id, tipo, alinhamento: 'centro' }
     case 'titulo': return { id, tipo, texto: 'Olá, {{nome}}!' }
-    case 'texto': return { id, tipo, texto: 'Escreva aqui o texto do comunicado.' }
+    case 'texto': return { id, tipo, texto: 'Escreva aqui o texto do comunicado.', alinhamento: 'justificado' }
     case 'botao': return { id, tipo, texto: 'Acessar documento' }
     case 'codigo': return { id, tipo, rotulo: 'Código de referência', ajuda: 'Informe este código caso precise falar com a nossa equipe.' }
-    case 'aviso': return { id, tipo, texto: 'Informação importante.', cor: 'atencao' }
-    case 'lista': return { id, tipo, itens: ['Primeiro item', 'Segundo item'] }
+    case 'aviso': return { id, tipo, texto: 'Informação importante.', cor: 'atencao', alinhamento: 'justificado' }
+    case 'lista': return { id, tipo, itens: ['Primeiro item', 'Segundo item'], alinhamento: 'justificado' }
     case 'separador': return { id, tipo }
     case 'imagem': return { id, tipo, arquivo: '', alt: '', largura: 400, alinhamento: 'centro' }
     default: return { id, tipo: 'texto', texto: '' }
@@ -281,7 +294,7 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
     <!-- Variáveis: clique insere no campo em foco -->
     <div class="rounded-lg border border-default bg-elevated/40 p-3">
       <p class="mb-2 text-xs font-medium text-muted">
-        Clique numa variável para inserir onde o cursor estiver
+        Personalize: clique dentro de um texto e depois no dado que quer inserir
       </p>
       <div class="flex flex-wrap gap-2">
         <UTooltip v-for="v in VARIAVEIS" :key="v.chave" :text="v.desc">
@@ -289,8 +302,8 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
             size="xs"
             color="neutral"
             variant="outline"
-            class="font-mono"
-            :label="v.rotulo || v.chave"
+            :icon="v.icone"
+            :label="v.rotulo"
             @mousedown.prevent
             @click="inserirVariavel(v.chave)"
           />
@@ -373,17 +386,37 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
             </p>
           </template>
 
-          <UFormField v-else-if="b.tipo === 'texto'" label="Texto" help="Quebras de linha são mantidas.">
-            <UTextarea v-model="b.texto" :rows="4" class="w-full" />
-          </UFormField>
+          <template v-else-if="b.tipo === 'texto'">
+            <UFormField label="Texto" help="Quebras de linha são mantidas.">
+              <UTextarea v-model="b.texto" :rows="4" class="w-full" />
+            </UFormField>
+            <UFormField label="Alinhamento">
+              <USelect
+                :model-value="b.alinhamento ?? 'justificado'"
+                :items="ALINHAMENTOS_TEXTO"
+                class="w-full sm:w-56"
+                @update:model-value="b.alinhamento = $event as AlinhamentoTexto"
+              />
+            </UFormField>
+          </template>
 
           <template v-else-if="b.tipo === 'aviso'">
             <UFormField label="Texto do aviso">
               <UTextarea v-model="b.texto" :rows="3" class="w-full" />
             </UFormField>
-            <UFormField label="Cor">
-              <USelect v-model="b.cor" :items="CORES_AVISO" class="w-full sm:w-56" />
-            </UFormField>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <UFormField label="Cor">
+                <USelect v-model="b.cor" :items="CORES_AVISO" class="w-full" />
+              </UFormField>
+              <UFormField label="Alinhamento">
+                <USelect
+                  :model-value="b.alinhamento ?? 'justificado'"
+                  :items="ALINHAMENTOS_TEXTO"
+                  class="w-full"
+                  @update:model-value="b.alinhamento = $event as AlinhamentoTexto"
+                />
+              </UFormField>
+            </div>
           </template>
 
           <template v-else-if="b.tipo === 'lista'">
@@ -404,14 +437,24 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
                 </div>
               </div>
             </UFormField>
-            <UButton
-              icon="i-lucide-plus"
-              label="Acrescentar item"
-              size="xs"
-              color="neutral"
-              variant="outline"
-              @click="b.itens = [...b.itens, '']"
-            />
+            <div class="flex flex-wrap items-end justify-between gap-3">
+              <UButton
+                icon="i-lucide-plus"
+                label="Acrescentar item"
+                size="xs"
+                color="neutral"
+                variant="outline"
+                @click="b.itens = [...b.itens, '']"
+              />
+              <UFormField label="Alinhamento">
+                <USelect
+                  :model-value="b.alinhamento ?? 'justificado'"
+                  :items="ALINHAMENTOS_TEXTO"
+                  class="w-44"
+                  @update:model-value="b.alinhamento = $event as AlinhamentoTexto"
+                />
+              </UFormField>
+            </div>
           </template>
 
           <template v-else-if="b.tipo === 'codigo'">

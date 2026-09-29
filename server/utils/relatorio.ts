@@ -1,5 +1,6 @@
 import { and, eq, or, ilike, gte, lte, isNotNull, isNull, sql, type SQL } from 'drizzle-orm'
 import { recipients, batches } from '../db'
+import { foraDaLixeira } from './lotes'
 
 export type FiltrosRelatorio = {
   batchId?: number
@@ -23,7 +24,8 @@ export function lerFiltros(q: Record<string, unknown>): FiltrosRelatorio {
 
 /** Traduz os filtros da tela em condicoes SQL. */
 export function montarWhere(f: FiltrosRelatorio) {
-  const cond: SQL[] = []
+  // toda consulta do relatorio faz join com batches: lote na lixeira nao entra
+  const cond: SQL[] = [foraDaLixeira]
   if (f.batchId) cond.push(eq(recipients.batchId, f.batchId))
   if (f.status) cond.push(eq(recipients.status, f.status))
 
@@ -54,8 +56,8 @@ export function montarWhere(f: FiltrosRelatorio) {
   }
   if (f.marco && marcos[f.marco]) cond.push(marcos[f.marco]!)
 
-  if (f.de) cond.push(gte(recipients.createdAt, new Date(`${f.de}T00:00:00`)))
-  if (f.ate) cond.push(lte(recipients.createdAt, new Date(`${f.ate}T23:59:59`)))
+  if (f.de) cond.push(gte(recipients.createdAt, new Date(`${f.de}T00:00:00${DESLOCAMENTO_SP}`)))
+  if (f.ate) cond.push(lte(recipients.createdAt, new Date(`${f.ate}T23:59:59.999${DESLOCAMENTO_SP}`)))
 
   return cond.length ? and(...cond) : undefined
 }

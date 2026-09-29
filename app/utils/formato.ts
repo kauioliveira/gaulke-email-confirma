@@ -1,14 +1,14 @@
+/**
+ * Datas SEMPRE no horario de Sao Paulo (shared/utils/fuso.ts), qualquer que
+ * seja o fuso do navegador: um horario que serve de prova precisa aparecer
+ * igual para todo mundo.
+ */
 export function dataHora(v: string | Date | null | undefined) {
-  if (!v) return '—'
-  const d = typeof v === 'string' ? new Date(v) : v
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' })
+  return formatarDataHora(v)
 }
 
 export function hora(v: string | Date | null | undefined) {
-  if (!v) return '—'
-  const d = typeof v === 'string' ? new Date(v) : v
-  return d.toLocaleTimeString('pt-BR', { hour12: false })
+  return formatarHora(v)
 }
 
 export function tamanho(bytes: number) {
@@ -47,7 +47,11 @@ export const ROTULOS_EVENTO: Record<string, string> = {
   acesso: 'Acessou a página',
   confirmacao: 'Confirmou a leitura',
   download: 'Baixou o arquivo',
-  reenvio: 'Reenviado'
+  reenvio: 'Reenviado',
+  devolucao: 'Devolução (não entregue)',
+  recibo: 'Recibo de leitura',
+  auto_resposta: 'Resposta automática',
+  resposta: 'Respondeu'
 }
 
 export const ICONES_EVENTO: Record<string, string> = {
@@ -58,5 +62,27 @@ export const ICONES_EVENTO: Record<string, string> = {
   acesso: 'i-lucide-mouse-pointer-click',
   confirmacao: 'i-lucide-badge-check',
   download: 'i-lucide-download',
-  reenvio: 'i-lucide-rotate-cw'
+  reenvio: 'i-lucide-rotate-cw',
+  devolucao: 'i-lucide-mail-x',
+  recibo: 'i-lucide-mail-check',
+  auto_resposta: 'i-lucide-bot',
+  resposta: 'i-lucide-reply'
+}
+
+/** Classificação das mensagens lidas da caixa do canal. */
+export const ROTULOS_CAIXA: Record<string, string> = {
+  devolucao_definitiva: 'Devolução definitiva',
+  devolucao_temporaria: 'Atraso na entrega',
+  recibo: 'Recibo de leitura',
+  auto_resposta: 'Resposta automática',
+  aviso_servidor: 'Aviso do servidor',
+  resposta: 'Resposta'
+}
+export const CORES_CAIXA: Record<string, string> = {
+  devolucao_definitiva: 'error',
+  devolucao_temporaria: 'warning',
+  recibo: 'success',
+  auto_resposta: 'neutral',
+  aviso_servidor: 'neutral',
+  resposta: 'info'
 }

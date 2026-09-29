@@ -30,8 +30,12 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+# Horario de Sao Paulo no processo inteiro: logs, e qualquer data formatada sem
+# fuso explicito. As telas, o CSV e os e-mails ja formatam com America/Sao_Paulo
+# (shared/utils/fuso.ts); isto fecha o que sobrar. tzdata da ao Alpine a base.
+ENV TZ=America/Sao_Paulo
 
-RUN apk add --no-cache tini && addgroup -S app && adduser -S app -G app
+RUN apk add --no-cache tini tzdata && addgroup -S app && adduser -S app -G app
 
 COPY --from=build /app/.output ./.output
 # migrations + script, para rodar `npm run db:migrate` dentro do container
@@ -48,8 +52,11 @@ COPY --from=build /app/node_modules/postgres ./node_modules/postgres
 # o ponto de montagem como ROOT — e o processo, que roda como `app` (USER
 # abaixo), passa a receber EACCES ao gravar. Em dev nada disso aparece: la o
 # processo e dono do diretorio.
-RUN mkdir -p /app/storage/files /app/storage/imagens && chown -R app:app /app/storage
-VOLUME ["/app/storage/files", "/app/storage/imagens"]
+#
+# `documentos` guarda o que os CLIENTES enviam pelas solicitacoes (pastas por
+# cliente, com quarentena ate o antivirus liberar).
+RUN mkdir -p /app/storage/files /app/storage/imagens /app/storage/documentos && chown -R app:app /app/storage
+VOLUME ["/app/storage/files", "/app/storage/imagens", "/app/storage/documentos"]
 
 USER app
 EXPOSE 3000

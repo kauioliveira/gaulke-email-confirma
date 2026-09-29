@@ -12,14 +12,20 @@
 
 export type CorAviso = 'neutro' | 'atencao' | 'alerta'
 export type Alinhamento = 'esquerda' | 'centro' | 'direita'
+/**
+ * Alinhamento do texto corrido (paragrafo, aviso, lista). Opcional no tipo
+ * para os blocos ja gravados continuarem validos: ausente = justificado, que
+ * e o padrao da comunicacao da empresa.
+ */
+export type AlinhamentoTexto = 'justificado' | 'esquerda' | 'centro'
 
 export type BlocoLogo = { id: string; tipo: 'logo'; alinhamento: Alinhamento }
 export type BlocoTitulo = { id: string; tipo: 'titulo'; texto: string }
-export type BlocoTexto = { id: string; tipo: 'texto'; texto: string }
+export type BlocoTexto = { id: string; tipo: 'texto'; texto: string; alinhamento?: AlinhamentoTexto }
 export type BlocoBotao = { id: string; tipo: 'botao'; texto: string }
 export type BlocoCodigo = { id: string; tipo: 'codigo'; rotulo: string; ajuda: string }
-export type BlocoAviso = { id: string; tipo: 'aviso'; texto: string; cor: CorAviso }
-export type BlocoLista = { id: string; tipo: 'lista'; itens: string[] }
+export type BlocoAviso = { id: string; tipo: 'aviso'; texto: string; cor: CorAviso; alinhamento?: AlinhamentoTexto }
+export type BlocoLista = { id: string; tipo: 'lista'; itens: string[]; alinhamento?: AlinhamentoTexto }
 export type BlocoSeparador = { id: string; tipo: 'separador' }
 export type BlocoImagem = {
   id: string

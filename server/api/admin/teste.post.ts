@@ -4,6 +4,7 @@ import { novoToken, novoCodigo } from '../../utils/ids'
 import { enviarEmail, resolverConta } from '../../utils/mailer'
 import { blocosSchema } from '../../utils/blocos-schema'
 import { renderizarBlocos } from '../../utils/blocos'
+import { auditar } from '../../utils/auditoria'
 
 const schema = z.object({
   para: z.string().email(),
@@ -40,6 +41,11 @@ export default defineEventHandler(async event => {
     html: renderizar(fonte, vars),
     texto: versaoTexto(vars, assuntoFinal),
     conta
+  })
+  await auditar(event, 'email.teste', {
+    entidade: 'email',
+    resumo: `Enviou um e-mail de teste para ${para} pelo canal "${conta.nome}"`,
+    dados: { para, assunto: assuntoFinal, canal: conta.nome }
   })
   return { ok: true, messageId: info.messageId, resposta: info.response, conta: conta.nome }
 })

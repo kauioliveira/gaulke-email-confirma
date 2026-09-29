@@ -1,6 +1,12 @@
 import { useSql } from '../db'
 import { iniciarLote } from './sender'
 import { useBatchBus } from './sse'
+import { processarFilaTickets, verificarSemConfirmacao } from './painel-tickets'
+import { processarQuarentena, enviarLembretes, avisarEntregasConcluidas } from './solicitacoes'
+import { lembrarSignatarios } from './assinatura'
+import { lembrarComunicados } from './lembretes'
+import { processarWebhooks } from './webhooks'
+import { retencaoDiaria } from './retencao'
 
 /**
  * Dispara lotes marcados para uma data e hora.
@@ -41,6 +47,7 @@ async function dispararVencidos() {
     update sys_mail_batches
        set status = 'enviando', observacao = null
      where status = 'agendado'
+       and excluido_em is null
        and agendado_para <= now()
        and agendado_para > now() - make_interval(mins => ${TOLERANCIA_MIN})
     returning id, nome
@@ -74,6 +81,7 @@ async function pausarAtrasados() {
     update sys_mail_batches
        set status = 'pausado', observacao = ${motivo}
      where status = 'agendado'
+       and excluido_em is null
        and agendado_para <= now() - make_interval(mins => ${TOLERANCIA_MIN})
     returning id, nome
   `
@@ -88,6 +96,12 @@ async function pausarAtrasados() {
   }
 }
 
+/** "sem confirmacao em N dias" e dia a dia: nao precisa rodar a cada 30s */
+const SEM_CONFIRMACAO_MS = 10 * 60_000
+let ultimaSemConfirmacao = 0
+let ultimosLembretes = 0
+let ultimaRetencao = 0
+
 export async function verificarAgendados() {
   try {
     // atrasados primeiro: assim um lote muito vencido nunca chega a ser
@@ -96,6 +110,46 @@ export async function verificarAgendados() {
     await dispararVencidos()
   } catch (e) {
     console.error('[gaulke-mail] agendador:', e instanceof Error ? e.message : e)
+  }
+
+  // chamados no painel: a fila e tentada a cada volta (a espera entre
+  // tentativas fica na propria fila)
+  try {
+    if (Date.now() - ultimaSemConfirmacao > SEM_CONFIRMACAO_MS) {
+      ultimaSemConfirmacao = Date.now()
+      await verificarSemConfirmacao()
+    }
+    await processarFilaTickets()
+  } catch (e) {
+    console.error('[gaulke-mail] chamados no painel:', e instanceof Error ? e.message : e)
+  }
+
+  // solicitacoes de documentos: arquivos presos na quarentena (clamd fora),
+  // aviso a quem pediu e lembretes ao cliente
+  try {
+    await processarQuarentena()
+    await avisarEntregasConcluidas()
+    if (Date.now() - ultimosLembretes > SEM_CONFIRMACAO_MS) {
+      ultimosLembretes = Date.now()
+      await enviarLembretes()
+      await lembrarSignatarios()
+      await lembrarComunicados()
+    }
+  } catch (e) {
+    console.error('[gaulke-mail] solicitacoes:', e instanceof Error ? e.message : e)
+  }
+
+  // webhooks: a fila e entregue a cada volta (as esperas ficam na propria fila)
+  await processarWebhooks()
+
+  // retencao LGPD: uma vez por dia; a propria rotina sabe se ja rodou hoje
+  try {
+    if (Date.now() - ultimaRetencao > SEM_CONFIRMACAO_MS) {
+      ultimaRetencao = Date.now()
+      await retencaoDiaria()
+    }
+  } catch (e) {
+    console.error('[gaulke-mail] retencao:', e instanceof Error ? e.message : e)
   }
 }
 

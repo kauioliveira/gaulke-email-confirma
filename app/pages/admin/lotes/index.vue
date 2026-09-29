@@ -5,6 +5,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin' })
 useHead({ title: 'Lotes — Gaulke Comunica' })
 
 const toast = useToast()
+const { sessao, eSupervisor } = usePapel()
 
 /** O USelect (Reka UI) reserva a string vazia, então "todos" precisa de valor. */
 const TODOS = 'todos'
@@ -15,6 +16,8 @@ const filtros = reactive({
   ordem: 'recentes',
   de: '',
   ate: '',
+  // arquivados ficam fora por padrão (item 3 do briefing)
+  arquivados: false,
   pagina: 1,
   porPagina: 20
 })
@@ -25,6 +28,7 @@ const consulta = computed(() => ({
   ordem: filtros.ordem,
   de: filtros.de || undefined,
   ate: filtros.ate || undefined,
+  arquivados: filtros.arquivados ? '1' : undefined,
   pagina: filtros.pagina,
   porPagina: filtros.porPagina
 }))
@@ -37,8 +41,8 @@ const { data, refresh, status } = await useFetch<RespostaLotes>(api('/api/admin/
 // mudou o filtro, volta para a primeira página — senão a pessoa fica numa
 // página que deixou de existir e a tela aparece vazia sem explicação
 watch(
-  () => [filtros.busca, filtros.status, filtros.ordem, filtros.de, filtros.ate],
-  () => { filtros.pagina = 1 }
+  () => [filtros.busca, filtros.status, filtros.ordem, filtros.de, filtros.ate, filtros.arquivados],
+  () => { filtros.pagina = 1; selecionados.value = [] }
 )
 
 const OPCOES_STATUS = [
@@ -79,7 +83,7 @@ const filtrando = computed(
 )
 
 function limpar() {
-  Object.assign(filtros, { busca: '', status: TODOS, de: '', ate: '', pagina: 1 })
+  Object.assign(filtros, { busca: '', status: TODOS, de: '', ate: '', arquivados: false, pagina: 1 })
 }
 
 // enquanto houver lote rodando, atualiza a lista sozinha
@@ -91,11 +95,63 @@ onMounted(() => {
 })
 onUnmounted(() => clearInterval(timer))
 
-async function excluir(id: number, nome: string) {
-  if (!confirm(`Excluir o lote "${nome}"? Os destinatários e todo o histórico de eventos serão apagados.`)) return
-  await $fetch(api(`/api/admin/batches/${id}`), { method: 'DELETE' })
-  toast.add({ title: 'Lote excluído', color: 'success' })
-  refresh()
+/* ---------- excluir ---------- */
+const excluindo = ref<Lote | null>(null)
+const modalExcluir = ref(false)
+
+const jaEnviou = (l: Lote) => l.enviados > 0 || l.falhas > 0 || !!l.startedAt
+
+/**
+ * Só oferece o que a pessoa pode fazer (o servidor confere de novo):
+ * disparado → supervisor/admin; nunca disparado → autor ou supervisor/admin.
+ */
+function podeExcluir(l: Lote) {
+  if (l.status === 'enviando') return false
+  if (jaEnviou(l)) return eSupervisor.value
+  return eSupervisor.value || l.criadoPorUserId === null || l.criadoPorUserId === sessao.value?.usuario?.id
+}
+
+function excluir(l: Lote) {
+  excluindo.value = l
+  modalExcluir.value = true
+}
+
+/* ---------- arquivar (um ou vários) ---------- */
+const selecionados = ref<number[]>([])
+const NAO_ARQUIVAVEIS = ['enviando', 'agendado']
+const arquivavel = (l: Lote) => !NAO_ARQUIVAVEIS.includes(l.status)
+
+function alternarSelecao(id: number, marcado: boolean) {
+  selecionados.value = marcado ? [...selecionados.value, id] : selecionados.value.filter(x => x !== id)
+}
+
+const loteSelecionados = computed(() => (data.value?.lotes ?? []).filter(l => selecionados.value.includes(l.id)))
+const podeArquivarSel = computed(() => loteSelecionados.value.some(l => !l.arquivadoEm && arquivavel(l)))
+const podeDesarquivarSel = computed(() => loteSelecionados.value.some(l => !!l.arquivadoEm))
+
+async function arquivar(ids: number[], valor: boolean) {
+  try {
+    const r = await $fetch<{ alterados: number; ignorados: number }>(api('/api/admin/batches/arquivar'), {
+      method: 'POST',
+      body: { ids, arquivar: valor }
+    })
+    toast.add({
+      title: valor
+        ? `${r.alterados} lote(s) arquivado(s)`
+        : `${r.alterados} lote(s) de volta à lista`,
+      description: r.ignorados
+        ? `${r.ignorados} ficaram de fora (enviando, agendado ou já ${valor ? 'arquivados' : 'fora do arquivo'}).`
+        : valor && !filtros.arquivados
+          ? 'Eles continuam funcionando para os destinatários. Para vê-los, ligue "Mostrar arquivados".'
+          : undefined,
+      color: 'success',
+      icon: valor ? 'i-lucide-archive' : 'i-lucide-archive-restore'
+    })
+    selecionados.value = []
+    refresh()
+  } catch (e: any) {
+    toast.add({ title: 'Não foi possível alterar', description: e?.statusMessage, color: 'error' })
+  }
 }
 
 function progresso(l: any) {
@@ -161,6 +217,12 @@ function progresso(l: any) {
           <UFormField label="Criado até">
             <UInput v-model="filtros.ate" type="date" class="w-full" />
           </UFormField>
+          <UFormField label="&nbsp;" class="lg:col-span-2">
+            <USwitch
+              v-model="filtros.arquivados"
+              :label="`Mostrar arquivados${data?.arquivados ? ` (${data.arquivados})` : ''}`"
+            />
+          </UFormField>
         </div>
 
         <!-- Atalhos: só aparecem quando existe algo naquele status -->
@@ -199,8 +261,46 @@ function progresso(l: any) {
     </UCard>
 
     <div v-else class="grid gap-4">
-      <UCard v-for="l in data.lotes" :key="l.id" class="transition hover:border-primary/40">
+      <!-- ações em massa: aparecem quando algo está marcado -->
+      <div
+        v-if="selecionados.length"
+        class="sticky top-16 z-30 flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-default/95 px-3 py-2 backdrop-blur"
+      >
+        <span class="text-sm font-medium">{{ selecionados.length }} selecionado(s)</span>
+        <UButton
+          v-if="podeArquivarSel"
+          label="Arquivar"
+          icon="i-lucide-archive"
+          size="sm"
+          color="neutral"
+          variant="outline"
+          @click="arquivar(selecionados, true)"
+        />
+        <UButton
+          v-if="podeDesarquivarSel"
+          label="Desarquivar"
+          icon="i-lucide-archive-restore"
+          size="sm"
+          color="neutral"
+          variant="outline"
+          @click="arquivar(selecionados, false)"
+        />
+        <UButton label="Limpar seleção" size="sm" color="neutral" variant="ghost" class="ml-auto" @click="selecionados = []" />
+      </div>
+
+      <UCard
+        v-for="l in data.lotes"
+        :key="l.id"
+        class="transition hover:border-primary/40"
+        :class="l.arquivadoEm && 'opacity-75'"
+      >
         <div class="flex flex-wrap items-start gap-4">
+          <UCheckbox
+            class="mt-1"
+            :model-value="selecionados.includes(l.id)"
+            :aria-label="`Selecionar ${l.nome}`"
+            @update:model-value="v => alternarSelecao(l.id, !!v)"
+          />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
               <NuxtLink :to="`/admin/lotes/${l.id}`" class="truncate font-semibold hover:text-primary">
@@ -214,6 +314,12 @@ function progresso(l: any) {
                 icon="i-lucide-loader-circle"
                 label="disparando"
               />
+              <UTooltip
+                v-if="l.arquivadoEm"
+                :text="`Arquivado em ${dataHora(l.arquivadoEm)}${l.arquivadoPorNome ? ` por ${l.arquivadoPorNome}` : ''}`"
+              >
+                <UBadge color="neutral" variant="outline" icon="i-lucide-archive" label="arquivado" />
+              </UTooltip>
             </div>
             <p class="mt-1 truncate text-sm text-muted">{{ l.assuntoSnapshot }}</p>
             <p class="mt-1 text-xs text-muted">
@@ -254,13 +360,24 @@ function progresso(l: any) {
               color="neutral"
               variant="ghost"
             />
-            <UButton
-              icon="i-lucide-trash-2"
-              color="error"
-              variant="ghost"
-              :disabled="l.status === 'enviando'"
-              @click="excluir(l.id, l.nome)"
-            />
+            <UTooltip v-if="l.arquivadoEm || arquivavel(l)" :text="l.arquivadoEm ? 'Desarquivar' : 'Arquivar'">
+              <UButton
+                :icon="l.arquivadoEm ? 'i-lucide-archive-restore' : 'i-lucide-archive'"
+                color="neutral"
+                variant="ghost"
+                :aria-label="l.arquivadoEm ? 'Desarquivar' : 'Arquivar'"
+                @click="arquivar([l.id], !l.arquivadoEm)"
+              />
+            </UTooltip>
+            <UTooltip v-if="podeExcluir(l)" :text="jaEnviou(l) ? 'Mandar para a lixeira' : 'Excluir'">
+              <UButton
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                aria-label="Excluir"
+                @click="excluir(l)"
+              />
+            </UTooltip>
           </div>
         </div>
       </UCard>
@@ -300,5 +417,7 @@ function progresso(l: any) {
         {{ data.total }} lote(s)
       </p>
     </div>
+
+    <ModalExcluirLote v-model:open="modalExcluir" :lote="excluindo" @excluido="refresh()" />
   </div>
 </template>

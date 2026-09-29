@@ -1,15 +1,20 @@
 import { listarContas } from '../../../utils/contas'
 import { chaveConfigurada, impressaoDaChave } from '../../../utils/cripto'
-import { smtpConfig } from '../../../utils/mailer'
+import { servidorPadrao } from '../../../utils/contas'
 
-/** Lista as contas de envio. A senha nunca vem junto. */
+/**
+ * Lista os canais de saida. A senha nunca vem junto.
+ *
+ * Todo usuario le esta lista (e ela que alimenta o "Sai por" do envio); so o
+ * admin altera, nas rotas vizinhas.
+ */
 export default defineEventHandler(async () => {
-  const c = smtpConfig()
   return {
     contas: chaveConfigurada() ? await listarContas() : [],
     // A tela precisa explicar o que fazer em vez de so falhar ao salvar.
     chave: { configurada: chaveConfigurada(), impressao: impressaoDaChave() },
-    // Referencia para quem for cadastrar: o servidor costuma ser o mesmo.
-    sugestao: { host: c.host, port: c.port, secure: c.secure, requireTls: c.requireTLS }
+    // O servidor costuma ser o mesmo para todas as caixas: o canal novo ja
+    // nasce com ele, e so pede usuario, senha e remetente.
+    sugestao: await servidorPadrao()
   }
 })

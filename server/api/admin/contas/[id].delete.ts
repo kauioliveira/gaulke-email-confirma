@@ -1,5 +1,8 @@
 import { eq, sql } from 'drizzle-orm'
 import { useDb, accounts, batches } from '../../../db'
+import { serializar } from '../../../utils/contas'
+import { exigirPapel } from '../../../utils/permissoes'
+import { auditar } from '../../../utils/auditoria'
 
 /**
  * Exclui uma conta.
@@ -12,6 +15,7 @@ import { useDb, accounts, batches } from '../../../db'
  * de um disparo transformaria o lote em uma fileira de falhas.
  */
 export default defineEventHandler(async event => {
+  exigirPapel(event, 'admin', 'excluir canais de saída')
   const id = Number(getRouterParam(event, 'id'))
   const db = useDb()
 
@@ -27,8 +31,15 @@ export default defineEventHandler(async event => {
     })
   }
 
-  const [removida] = await db.delete(accounts).where(eq(accounts.id, id)).returning({ id: accounts.id })
+  const [removida] = await db.delete(accounts).where(eq(accounts.id, id)).returning()
   if (!removida) throw createError({ statusCode: 404, statusMessage: 'Conta nao encontrada' })
+
+  await auditar(event, 'conta.excluir', {
+    entidade: 'conta',
+    id,
+    resumo: `Excluiu o canal de saída "${removida.nome}" (${removida.remetente})`,
+    dados: serializar(removida)
+  })
 
   return { ok: true }
 })

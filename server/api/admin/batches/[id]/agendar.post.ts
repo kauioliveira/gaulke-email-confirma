@@ -1,9 +1,10 @@
 import { z } from 'zod'
 import { and, eq, sql } from 'drizzle-orm'
 import { useDb, batches, recipients } from '../../../../db'
-import { smtpConfig } from '../../../../utils/mailer'
+import { resolverConta } from '../../../../utils/mailer'
 import { checarBaseUrl } from '../../../../utils/urls'
 import { loteEmExecucao } from '../../../../utils/sender'
+import { auditar } from '../../../../utils/auditoria'
 
 const schema = z.object({
   /** ISO 8601 com fuso. `null` cancela o agendamento. */
@@ -19,7 +20,7 @@ export default defineEventHandler(async event => {
   const db = useDb()
 
   const lote = (await db.select().from(batches).where(eq(batches.id, id)))[0]
-  if (!lote) throw createError({ statusCode: 404, statusMessage: 'Lote nao encontrado' })
+  if (!lote || lote.excluidoEm) throw createError({ statusCode: 404, statusMessage: 'Lote nao encontrado' })
 
   // ---- cancelar ----
   if (agendadoPara === null) {
@@ -31,6 +32,11 @@ export default defineEventHandler(async event => {
       .set({ status: 'rascunho', agendadoPara: null, agendadoEm: null, observacao: null })
       .where(eq(batches.id, id))
       .returning()
+    await auditar(event, 'lote.cancelar_agendamento', {
+      entidade: 'lote',
+      id,
+      resumo: `Cancelou o agendamento do lote "${lote.nome}" (era ${formatarDataHora(lote.agendadoPara)})`
+    })
     return { ok: true, lote: atualizado }
   }
 
@@ -38,8 +44,12 @@ export default defineEventHandler(async event => {
   if (loteEmExecucao(id) || lote.status === 'enviando') {
     throw createError({ statusCode: 400, statusMessage: 'O lote ja esta disparando' })
   }
-  if (!smtpConfig().enabled) {
-    throw createError({ statusCode: 400, statusMessage: 'SMTP desabilitado (NUXT_SMTP_ENABLED=false)' })
+  // o canal do lote, e nao o .env (veja start.post.ts)
+  const conta = await resolverConta(lote.contaId).catch(e => {
+    throw createError({ statusCode: 400, statusMessage: `Canal de saída indisponível: ${e instanceof Error ? e.message : e}` })
+  })
+  if (!conta.enabled) {
+    throw createError({ statusCode: 400, statusMessage: `O canal de saída "${conta.nome}" está desativado` })
   }
 
   const quando = new Date(agendadoPara)
@@ -73,6 +83,13 @@ export default defineEventHandler(async event => {
     })
     .where(eq(batches.id, id))
     .returning()
+
+  await auditar(event, 'lote.agendar', {
+    entidade: 'lote',
+    id,
+    resumo: `Agendou o lote "${lote.nome}" para ${formatarDataHora(quando)}`,
+    dados: { de: lote.agendadoPara, para: quando, pendentes }
+  })
 
   // mesmo aviso do disparo manual: link publico invalido quebra o e-mail todo
   return { ok: true, lote: atualizado, pendentes, aviso: checarBaseUrl() }

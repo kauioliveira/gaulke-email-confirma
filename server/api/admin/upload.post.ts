@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import { garantirStorage, nomeSeguro, caminhoNoStorage } from '../../utils/storage'
 import { TIPOS_ANEXO, tipoPelaExtensao, assinaturaConfere, rotulosDe } from '../../../shared/types/tipos-arquivo'
 import { falhar } from '../../utils/erro'
+import { auditar } from '../../utils/auditoria'
 
 const MAX_BYTES = 25 * 1024 * 1024
 
@@ -57,6 +58,13 @@ export default defineEventHandler(async event => {
   } catch (err) {
     throw falhar(event, 'gravacao do anexo no storage', err)
   }
+
+  await auditar(event, 'arquivo.enviar', {
+    entidade: 'arquivo',
+    id: nome,
+    resumo: `Enviou o anexo "${arquivo.filename}" (${tipo.rotulo}, ${(arquivo.data.length / 1024).toFixed(0)} KB)`,
+    dados: { nome, original: arquivo.filename, bytes: arquivo.data.length, tipo: tipo.rotulo }
+  })
 
   return { ok: true, nome, nomeOriginal: arquivo.filename, tamanho: arquivo.data.length }
 })

@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import { garantirImagens, nomeSeguro, caminhoNaImagem } from '../../utils/storage'
 import { TIPOS_IMAGEM, tipoPelaExtensao, assinaturaConfere, rotulosDe } from '../../../shared/types/tipos-arquivo'
 import { falhar } from '../../utils/erro'
+import { auditar } from '../../utils/auditoria'
 
 /**
  * Upload de uma imagem do computador para o corpo do e-mail.
@@ -52,6 +53,13 @@ export default defineEventHandler(async event => {
   } catch (err) {
     throw falhar(event, 'gravacao da imagem no storage', err)
   }
+
+  await auditar(event, 'imagem.enviar', {
+    entidade: 'imagem',
+    id: nome,
+    resumo: `Enviou a imagem "${arquivo.filename}" para o corpo dos e-mails`,
+    dados: { nome, original: arquivo.filename, bytes: arquivo.data.length }
+  })
 
   // `caminho` e o que o bloco de imagem guarda e o que vira o src no e-mail
   return {

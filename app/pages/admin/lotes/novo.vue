@@ -20,6 +20,8 @@ definePageMeta({ layout: 'admin', middleware: 'admin' })
 useHead({ title: 'Novo envio — Gaulke Comunica' })
 
 const toast = useToast()
+// canais de saida sao geridos so por admin; os demais apenas escolhem
+const { eAdmin } = usePapel()
 const passo = ref(1)
 const PASSOS = [
   { n: 1, titulo: 'Lista', icone: 'i-lucide-users' },
@@ -29,11 +31,12 @@ const PASSOS = [
 ]
 
 /* ---------- Passo 1: lista ---------- */
-type Origem = 'arquivo' | 'banco' | 'manual' | 'sistema'
+type Origem = 'arquivo' | 'lista' | 'banco' | 'manual' | 'sistema'
 const origem = ref<Origem>('arquivo')
 
 const ORIGENS = [
   { valor: 'arquivo' as Origem, titulo: 'Importar arquivo', icone: 'i-lucide-file-spreadsheet', desc: 'CSV ou XLSX' },
+  { valor: 'lista' as Origem, titulo: 'Lista salva', icone: 'i-lucide-list', desc: 'listas de contatos' },
   { valor: 'banco' as Origem, titulo: 'Do banco', icone: 'i-lucide-database', desc: 'quem já recebeu antes' },
   { valor: 'manual' as Origem, titulo: 'Digitar', icone: 'i-lucide-keyboard', desc: 'colar ou digitar' },
   { valor: 'sistema' as Origem, titulo: 'Do sistema', icone: 'i-lucide-users-round', desc: 'equipe e clientes' }
@@ -79,7 +82,7 @@ function dicaDoErro(mensagem: string, arquivo: string) {
   }
   return 'Confira se o arquivo abre normalmente no Excel e se a primeira linha tem os nomes das colunas. Se ele veio de outro sistema, tente salvar de novo como CSV.'
 }
-const mapa = reactive({ email: SEM_COLUNA, nome: SEM_COLUNA, empresa: SEM_COLUNA })
+const mapa = reactive({ email: SEM_COLUNA, nome: SEM_COLUNA, empresa: SEM_COLUNA, documento: SEM_COLUNA })
 const colunasExtras = ref<string[]>([])
 
 async function importar(e: Event) {
@@ -95,6 +98,7 @@ async function importar(e: Event) {
     mapa.email = r.sugestao.email || SEM_COLUNA
     mapa.nome = r.sugestao.nome || SEM_COLUNA
     mapa.empresa = r.sugestao.empresa || SEM_COLUNA
+    mapa.documento = r.sugestao.documento || SEM_COLUNA
     colunasExtras.value = []
     erroImportacao.value = null
     toast.add({ title: `${r.total} linha(s) lidas de ${r.arquivo}`, color: 'success' })
@@ -144,7 +148,7 @@ const filtroContatos = reactive({ busca: '', marco: 'todos', batchId: 0 })
  * removeria da lista quem já tinha sido marcado, e a pessoa sairia do envio
  * sem ninguém perceber.
  */
-const escolhidos = ref<Record<string, { email: string; nome: string; empresa: string }>>({})
+const escolhidos = ref<Record<string, { email: string; nome: string; empresa: string; documento: string }>>({})
 const selecionados = computed(() => Object.keys(escolhidos.value))
 
 function alternarContato(c: Contato) {
@@ -155,7 +159,7 @@ function alternarContato(c: Contato) {
   }
   escolhidos.value = {
     ...escolhidos.value,
-    [c.email]: { email: c.email, nome: c.nome || '', empresa: c.empresa || '' }
+    [c.email]: { email: c.email, nome: c.nome || '', empresa: c.empresa || '', documento: c.documento || '' }
   }
 }
 
@@ -186,7 +190,7 @@ function alternarTodos() {
   }
   const adicionados = { ...escolhidos.value }
   for (const c of contatos.value) {
-    adicionados[c.email] = { email: c.email, nome: c.nome || '', empresa: c.empresa || '' }
+    adicionados[c.email] = { email: c.email, nome: c.nome || '', empresa: c.empresa || '', documento: c.documento || '' }
   }
   escolhidos.value = adicionados
 }
@@ -276,6 +280,8 @@ type Item = {
   email: string
   nome: string
   empresa: string
+  /** CPF/CNPJ: casa o arquivo individual com a pessoa */
+  documento: string
   origem: string
   extras: Record<string, string>
 }
@@ -361,6 +367,7 @@ type LinhaEntrada = {
   email: string
   nome?: string
   empresa?: string
+  documento?: string | null
   extras?: Record<string, string>
   /** numero da linha na planilha ou no texto colado, quando a origem sabe */
   linha?: number
@@ -415,6 +422,7 @@ function adicionar(linhas: LinhaEntrada[], origem: string) {
       email,
       nome: l.nome || '',
       empresa: l.empresa || '',
+      documento: l.documento || '',
       origem,
       extras: l.extras || {}
     }
@@ -460,6 +468,7 @@ function adicionarDoArquivo() {
       email: String(l[mapa.email] || ''),
       nome: mapa.nome === SEM_COLUNA ? '' : String(l[mapa.nome] || ''),
       empresa: mapa.empresa === SEM_COLUNA ? '' : String(l[mapa.empresa] || ''),
+      documento: mapa.documento === SEM_COLUNA ? '' : String(l[mapa.documento] || ''),
       extras
     }
   })
@@ -476,15 +485,81 @@ function adicionarDigitados() {
 }
 
 function adicionarPessoa(p: Pessoa) {
-  adicionar([{ email: p.email, nome: p.nome, empresa: p.detalhe || '' }],
+  adicionar([{ email: p.email, nome: p.nome, empresa: p.detalhe || '', documento: p.documento }],
     p.origem === 'equipe' ? 'equipe' : 'cliente')
 }
 
 function adicionarTodasPessoas() {
   adicionar(
-    pessoas.value.map(p => ({ email: p.email, nome: p.nome, empresa: p.detalhe || '' })),
+    pessoas.value.map(p => ({ email: p.email, nome: p.nome, empresa: p.detalhe || '', documento: p.documento })),
     'sistema'
   )
+}
+
+/* ---------- origem: lista salva ---------- */
+const route = useRoute()
+const { data: listasSalvas, execute: carregarListas } = await useFetch<ResumoLista[]>(api('/api/admin/listas'), {
+  default: () => [],
+  immediate: false,
+  server: false
+})
+watch(origem, o => { if (o === 'lista' && !listasSalvas.value.length) carregarListas() })
+const listaEscolhida = ref<number | undefined>(undefined)
+const carregandoLista = ref(false)
+async function adicionarDaLista(idLista = listaEscolhida.value) {
+  if (!idLista) return
+  carregandoLista.value = true
+  try {
+    const l = await $fetch<DetalheLista>(api(`/api/admin/listas/${idLista}`))
+    adicionar(
+      l.membros.map(m => ({ email: m.email, nome: m.nome ?? '', empresa: m.empresa ?? '', documento: m.documento, extras: m.extras ?? {} })),
+      `lista: ${l.nome}`
+    )
+  } catch (e: any) {
+    toast.add({ title: 'Não foi possível abrir a lista', description: e?.data?.statusMessage || e?.statusMessage, color: 'error' })
+  } finally {
+    carregandoLista.value = false
+  }
+}
+// "Usar num envio", da tela da lista: /admin/lotes/novo?lista=12
+onMounted(() => {
+  const q = Number(route.query.lista)
+  if (!q) return
+  origem.value = 'lista'
+  listaEscolhida.value = q
+  adicionarDaLista(q)
+})
+
+/* salvar o que foi montado aqui como lista, para a proxima vez */
+const modalSalvarLista = ref(false)
+const novaLista = reactive({ nome: '', descricao: '' })
+const salvandoLista = ref(false)
+async function salvarComoLista() {
+  salvandoLista.value = true
+  try {
+    const r = await $fetch<{ id: number; adicionados: number }>(api('/api/admin/listas'), {
+      method: 'POST',
+      body: {
+        nome: novaLista.nome,
+        descricao: novaLista.descricao || null,
+        membros: Object.values(carrinho.value).map(i => ({
+          email: i.email,
+          nome: i.nome || null,
+          empresa: i.empresa || null,
+          documento: i.documento || null,
+          extras: i.extras
+        }))
+      }
+    })
+    toast.add({ title: `Lista "${novaLista.nome}" salva com ${r.adicionados} contato(s)`, color: 'success' })
+    modalSalvarLista.value = false
+    novaLista.nome = ''
+    novaLista.descricao = ''
+  } catch (e: any) {
+    toast.add({ title: 'Não foi possível salvar a lista', description: e?.data?.statusMessage || e?.statusMessage, color: 'error' })
+  } finally {
+    salvandoLista.value = false
+  }
 }
 
 const CORES_ORIGEM: Record<string, string> = {
@@ -581,6 +656,35 @@ function removerAnexo() {
   arquivoOriginal.value = ''
 }
 
+/* ---------- modo do anexo: nenhum | único | individual ---------- */
+type ModoAnexo = 'nenhum' | 'unico' | 'individual'
+const modoAnexo = ref<ModoAnexo>('nenhum')
+const MODOS_ANEXO: { valor: ModoAnexo; titulo: string; texto: string; icone: string }[] = [
+  { valor: 'nenhum', titulo: 'Sem anexo', texto: 'Só um aviso (comunicado).', icone: 'i-lucide-megaphone' },
+  { valor: 'unico', titulo: 'Um arquivo para todos', texto: 'O mesmo documento para a lista inteira.', icone: 'i-lucide-file' },
+  { valor: 'individual', titulo: 'Um arquivo para cada destinatário', texto: 'Cada cliente recebe o SEU: guia, holerite, informe.', icone: 'i-lucide-files' }
+]
+
+// anexo individual: arquivos recebidos, ligações feitas à mão e a opção de
+// mandar sem anexo para quem ficou sem arquivo
+type ArquivoIndividual = { nome: string; original: string; tamanho: number; tipo: string }
+const arquivosIndividuais = ref<ArquivoIndividual[]>([])
+const ligacoesManuais = ref<Record<string, string>>({})
+const enviarSemArquivo = ref(false)
+
+const casamento = computed(() =>
+  casarArquivos(arquivosIndividuais.value, listaProcessada.value.validos, ligacoesManuais.value)
+)
+const totalComArquivo = computed(() => Object.keys(casamento.value.casados).length)
+
+function escolherModoAnexo(m: ModoAnexo) {
+  modoAnexo.value = m
+  if (m !== 'unico') removerAnexo()
+  if (m !== 'nenhum') garantirBotaoDeAcesso()
+}
+// o botão de acesso é obrigatório também no individual
+watch(totalComArquivo, n => { if (n && modoAnexo.value === 'individual') garantirBotaoDeAcesso() })
+
 /* ---------- Passo 3: e-mail ---------- */
 const { data: templatesData } = await useFetch<RespostaTemplates>(api('/api/admin/templates'))
 const templateId = ref<number | null>(null)
@@ -618,27 +722,41 @@ function aplicarTemplate(id: number | null) {
 if (templatesData.value?.templates.length) aplicarTemplate(templatesData.value.templates[0]!.id)
 
 const opcoesTemplates = computed(() =>
-  (templatesData.value?.templates || []).map(t => ({ label: t.nome, value: t.id }))
+  (templatesData.value?.templates || []).map(t => ({
+    label: `${t.nome}${t.categoria ? ` · ${t.categoria}` : ''}${t.tipo === 'comunicado' ? ' (comunicado)' : ''}`,
+    value: t.id
+  }))
 )
 
 /* ---------- Passo 4: revisão ---------- */
-const nomeLote = ref(`Envio ${new Date().toLocaleDateString('pt-BR')}`)
+const nomeLote = ref(`Envio ${formatarData(new Date())}`)
 const intervaloSegundos = ref(10)
 const exigirConfirmacao = ref(true)
 const pedirRecibo = ref(false)
+// lembrete automatico: so com o botao de acesso, que e por onde se confirma
+const lembreteLigado = ref(false)
+const lembreteDias = ref(3)
+const lembreteMax = ref(2)
+const temBotaoDeAcesso = computed(() =>
+  formatoEmail.value === 'blocos' ? blocosEmail.value.some(b => b.tipo === 'botao') : /\{\{\s*link\s*\}\}/.test(html.value)
+)
+const lembreteDoEnvio = computed(() =>
+  lembreteLigado.value && temBotaoDeAcesso.value ? { dias: lembreteDias.value, max: lembreteMax.value } : null
+)
 const criando = ref(false)
 
 /* ---------- agendamento ---------- */
 const quandoDisparar = ref<'depois' | 'agendar'>('depois')
 const dataAgendada = ref('')
 
-/** Sugere daqui a 1h, arredondado — evita cair numa data invalida. */
+/**
+ * Sugere daqui a 1h, na hora cheia — evita cair numa data invalida.
+ * A hora e a de Sao Paulo, e nao a do computador de quem agenda: o campo e
+ * interpretado como horario de Brasilia (veja agendadoParaISO).
+ */
 function sugerirHorario() {
-  const d = new Date(Date.now() + 60 * 60 * 1000)
-  d.setMinutes(0, 0, 0)
-  // datetime-local espera "YYYY-MM-DDTHH:mm" em hora LOCAL, sem fuso
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+  const p = partesSP(new Date(Date.now() + 60 * 60 * 1000))
+  return `${p.ano}-${p.mes}-${p.dia}T${p.hora}:00`
 }
 
 watch(quandoDisparar, v => {
@@ -646,15 +764,14 @@ watch(quandoDisparar, v => {
 })
 
 /**
- * O input datetime-local devolve hora LOCAL sem fuso ("2026-08-27T08:00").
- * `new Date(...)` interpreta no fuso do navegador e o toISOString converte
- * para UTC, que e o que o banco guarda. Mandar a string crua faria 8h de
- * Brasilia virar 8h UTC — o comunicado sairia 3h antes.
+ * O input datetime-local devolve hora SEM fuso ("2026-08-27T08:00"). Ela e
+ * sempre entendida como horario de Sao Paulo, e nao do navegador: quem agenda
+ * de um notebook com o relogio em outro fuso continuaria marcando 8h de
+ * Brasilia. Mandar a string crua faria 8h virar 8h UTC — 3h antes.
  */
 const agendadoParaISO = computed(() => {
   if (quandoDisparar.value !== 'agendar' || !dataAgendada.value) return null
-  const d = new Date(dataAgendada.value)
-  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  return localSPparaISO(dataAgendada.value)
 })
 
 const agendamentoValido = computed(() => {
@@ -677,6 +794,12 @@ const tempoEstimado = computed(() =>
 
 const podeAvancar = computed(() => {
   if (passo.value === 1) return totalCarrinho.value > 0
+  if (passo.value === 2) {
+    if (modoAnexo.value === 'unico') return !!arquivoNome.value
+    if (modoAnexo.value === 'individual') {
+      return totalComArquivo.value > 0 && (!casamento.value.semArquivo.length || enviarSemArquivo.value)
+    }
+  }
   if (passo.value === 3) {
     const temConteudo = formatoEmail.value === 'blocos' ? blocosEmail.value.length > 0 : !!html.value
     return !!assunto.value && temConteudo
@@ -716,6 +839,117 @@ const rotuloFormatoNome = computed(() => {
 
 const contaEscolhida = computed(() => contasAtivas.value.find(c => c.id === contaId.value) || null)
 
+/**
+ * "Respostas para": sai por um canal e as respostas podem ir para outro — o
+ * do setor, por exemplo. 'canal' = o reply-to do próprio canal de saída.
+ */
+const OUTRO = 'outro'
+const respostaModo = ref<string>('canal')
+const respostaOutro = ref('')
+const itensResposta = computed(() => {
+  const proprio = contaEscolhida.value?.responderPara || contaEscolhida.value?.remetente
+  const vistos = new Set<string>([String(proprio ?? '').toLowerCase()])
+  const deOutrosCanais = contasAtivas.value
+    .filter(c => c.id !== contaId.value)
+    .map(c => ({ canal: c.nome, endereco: c.responderPara || c.remetente }))
+    .filter(x => {
+      const k = x.endereco.toLowerCase()
+      if (vistos.has(k)) return false
+      vistos.add(k)
+      return true
+    })
+  return [
+    { label: proprio ? `O do próprio canal — ${proprio}` : 'O do próprio canal', value: 'canal' },
+    ...deOutrosCanais.map(x => ({ label: `${x.canal} — ${x.endereco}`, value: x.endereco })),
+    { label: 'Outro endereço…', value: OUTRO }
+  ]
+})
+// trocou o canal: a opção escolhida pode ter deixado de existir
+watch(contaId, () => {
+  if (respostaModo.value !== OUTRO && respostaModo.value !== 'canal'
+    && !itensResposta.value.some(i => i.value === respostaModo.value)) respostaModo.value = 'canal'
+})
+/** o que vai para o lote: nulo = o do canal */
+const responderPara = computed(() => {
+  if (respostaModo.value === 'canal') return null
+  if (respostaModo.value === OUTRO) return respostaOutro.value.trim() || null
+  return respostaModo.value
+})
+const respostaInvalida = computed(
+  () => respostaModo.value === OUTRO && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(respostaOutro.value.trim())
+)
+
+/* ---------- domínios que não recebem e-mail / digitados errado ---------- */
+const emailsDaLista = computed(() => listaProcessada.value.validos.map(d => d.email))
+const dominiosSemEmail = ref(0)
+
+/** Troca o domínio em todos os e-mails afetados (a chave do carrinho é o e-mail). */
+function corrigirDominio(de: string, para: string) {
+  const novo: Record<string, Item> = {}
+  let trocados = 0
+  for (const [email, item] of Object.entries(carrinho.value)) {
+    if (email.endsWith(`@${de}`)) {
+      const corrigido = `${email.slice(0, -de.length)}${para}`
+      novo[corrigido] = { ...item, email: corrigido }
+      trocados++
+    } else {
+      novo[email] = item
+    }
+  }
+  carrinho.value = novo
+  toast.add({ title: `${trocados} e-mail(s) corrigido(s) para @${para}`, color: 'success', icon: 'i-lucide-wand-sparkles' })
+}
+function removerEmails(emails: string[]) {
+  const fora = new Set(emails)
+  carrinho.value = Object.fromEntries(Object.entries(carrinho.value).filter(([e]) => !fora.has(e)))
+  toast.add({ title: `${emails.length} destinatário(s) removido(s) da lista`, color: 'success' })
+}
+
+/* ---------- chamados no painel ---------- */
+// pré-marcado conforme o canal; quem envia pode desligar para este lote
+const criarTickets = ref(false)
+watch(contaEscolhida, c => { criarTickets.value = !!c?.criarTickets }, { immediate: true })
+
+/**
+ * As respostas vão para uma caixa que alguém monitora? Se o "Respostas para"
+ * aponta para um endereço que não é de canal com monitor ligado, o sistema não
+ * vai ver as respostas — nem abrir chamado.
+ */
+const caixaNaoMonitorada = computed(() => {
+  const destino = (responderPara.value || contaEscolhida.value?.responderPara || contaEscolhida.value?.remetente || '')
+    .replace(/.*</, '').replace(/>.*/, '').trim().toLowerCase()
+  if (!destino) return false
+  return !contasAtivas.value.some(c =>
+    c.monitorarCaixa && [c.remetente, c.responderPara ?? ''].some(e => e.replace(/.*</, '').replace(/>.*/, '').trim().toLowerCase() === destino)
+  )
+})
+
+/* ---------- confirmação antes de criar/agendar ---------- */
+const confirmando = ref(false)
+const resumoEnvio = computed(() => ({
+  canal: contaEscolhida.value?.nome ?? null,
+  remetente: contaEscolhida.value?.remetente ?? null,
+  responderPara: responderPara.value ?? contaEscolhida.value?.responderPara ?? null,
+  destinatarios: listaProcessada.value.validos.length,
+  anexo:
+    modoAnexo.value === 'individual'
+      ? `Individual: ${totalComArquivo.value} com arquivo${casamento.value.semArquivo.length ? `, ${casamento.value.semArquivo.length} sem arquivo (vão sem anexo)` : ''}`
+      : arquivoOriginal.value || null,
+  quando: (agendadoParaISO.value ? 'agendado' : 'rascunho') as 'agendado' | 'rascunho',
+  agendadoPara: agendadoParaISO.value,
+  duracao: tempoEstimado.value,
+  exigirConfirmacao: exigirConfirmacao.value,
+  lembrete: lembreteDoEnvio.value,
+  avisos: [
+    ...(dominiosSemEmail.value
+      ? [`${dominiosSemEmail.value} endereço(s)/domínio(s) da lista não recebe(m) e-mail — esses envios vão voltar como devolução.`]
+      : []),
+    ...(criarTickets.value && caixaNaoMonitorada.value
+      ? ['As respostas vão para uma caixa que o sistema NÃO monitora: respostas de clientes não serão vistas nem viram chamado.']
+      : [])
+  ]
+}))
+
 async function criarLote() {
   criando.value = true
   try {
@@ -733,18 +967,31 @@ async function criarLote() {
         arquivoOriginal: arquivoOriginal.value || null,
         intervaloMs: intervaloSegundos.value * 1000,
         contaId: contaId.value || null,
+        responderPara: responderPara.value,
+        criarTickets: criarTickets.value,
         exigirConfirmacao: exigirConfirmacao.value,
         pedirRecibo: pedirRecibo.value,
+        lembrete: lembreteDoEnvio.value,
         agendadoPara: agendadoParaISO.value,
-        destinatarios: listaProcessada.value.validos
+        modoAnexo: modoAnexo.value,
+        enviarSemArquivo: enviarSemArquivo.value,
+        // no individual, cada destinatário leva o arquivo dele
+        destinatarios: listaProcessada.value.validos.map(d => {
+          const c = modoAnexo.value === 'individual' ? casamento.value.casados[d.email] : undefined
+          return c ? { ...d, arquivoNome: c.arquivo.nome, arquivoOriginal: c.arquivo.original } : d
+        })
       }
     })
     toast.add({
       title: agendadoParaISO.value
-        ? `Lote agendado para ${new Date(agendadoParaISO.value).toLocaleString('pt-BR')}`
+        ? `Lote agendado para ${formatarDataHora(agendadoParaISO.value)}`
         : `Lote criado com ${r.destinatarios} destinatários`,
+      description: r.ignoradosSupressao
+        ? `${r.ignoradosSupressao} endereço(s) ficaram de fora: já devolveram antes (lista de supressão).`
+        : undefined,
       color: 'success'
     })
+    confirmando.value = false
     await navigateTo(`/admin/lotes/${r.lote.id}`)
   } catch (e: any) {
     toast.add({ title: 'Erro ao criar o lote', description: e?.statusMessage, color: 'error' })
@@ -782,7 +1029,7 @@ async function criarLote() {
 
       <div class="space-y-5">
         <!-- Escolha da origem -->
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <button
             v-for="o in ORIGENS"
             :key="o.valor"
@@ -879,7 +1126,7 @@ async function criarLote() {
             title="Nenhuma coluna de e-mail foi reconhecida"
             :description="`O arquivo tem ${importado.colunas.length} coluna(s): ${importado.colunas.join(', ')}. Escolha abaixo qual delas contém o endereço — sem isso não há para onde enviar e nada pode ser acrescentado.`"
           />
-          <div class="grid gap-4 sm:grid-cols-3">
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <UFormField label="Coluna de e-mail" required>
               <USelect v-model="mapa.email" :items="opcoesColunas" class="w-full" />
             </UFormField>
@@ -888,6 +1135,9 @@ async function criarLote() {
             </UFormField>
             <UFormField label="Coluna de empresa">
               <USelect v-model="mapa.empresa" :items="opcoesColunas" class="w-full" />
+            </UFormField>
+            <UFormField label="Coluna de CPF/CNPJ" help="Casa cada cliente com o arquivo dele, no anexo individual.">
+              <USelect v-model="mapa.documento" :items="opcoesColunas" class="w-full" />
             </UFormField>
           </div>
 
@@ -911,6 +1161,31 @@ async function criarLote() {
             @click="adicionarDoArquivo"
           />
         </template>
+        </template>
+
+        <!-- ORIGEM: LISTA SALVA -->
+        <template v-if="origem === 'lista'">
+          <div class="flex flex-wrap items-end gap-3">
+            <UFormField label="Lista" class="w-full sm:w-96">
+              <USelect
+                v-model="listaEscolhida"
+                :items="listasSalvas.map(l => ({ label: `${l.nome} (${l.total})`, value: l.id }))"
+                placeholder="Escolha uma lista"
+                class="w-full"
+              />
+            </UFormField>
+            <UButton
+              label="Acrescentar os contatos da lista"
+              icon="i-lucide-plus"
+              :loading="carregandoLista"
+              :disabled="!listaEscolhida"
+              @click="adicionarDaLista()"
+            />
+            <UButton to="/admin/listas" label="Gerenciar listas" icon="i-lucide-external-link" color="neutral" variant="ghost" size="sm" />
+          </div>
+          <p v-if="!listasSalvas.length" class="text-sm text-muted">
+            Nenhuma lista salva ainda. Monte os destinatários por outra origem e use “Salvar como lista”, ou crie em Listas.
+          </p>
         </template>
 
         <!-- ORIGEM: BANCO -->
@@ -1146,16 +1421,43 @@ async function criarLote() {
               Pode misturar origens — e-mails repetidos entram uma vez só.
             </p>
           </div>
-          <UButton
-            v-if="totalCarrinho"
-            icon="i-lucide-trash-2"
-            label="Limpar lista"
-            size="xs"
-            color="error"
-            variant="ghost"
-            @click="limparCarrinho"
-          />
+          <div v-if="totalCarrinho" class="flex gap-1">
+            <UButton
+              icon="i-lucide-list-plus"
+              label="Salvar como lista"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              @click="modalSalvarLista = true"
+            />
+            <UButton
+              icon="i-lucide-trash-2"
+              label="Limpar lista"
+              size="xs"
+              color="error"
+              variant="ghost"
+              @click="limparCarrinho"
+            />
+          </div>
         </div>
+
+        <UModal v-model:open="modalSalvarLista" title="Salvar como lista">
+          <template #body>
+            <form class="space-y-4" @submit.prevent="salvarComoLista">
+              <p class="text-sm text-muted">Os {{ totalCarrinho }} destinatários ficam salvos para os próximos envios e solicitações.</p>
+              <UFormField label="Nome da lista" required>
+                <UInput v-model="novaLista.nome" placeholder="Clientes do Simples Nacional" class="w-full" autofocus />
+              </UFormField>
+              <UFormField label="Descrição" hint="opcional">
+                <UInput v-model="novaLista.descricao" class="w-full" />
+              </UFormField>
+              <div class="flex justify-end gap-2">
+                <UButton label="Cancelar" color="neutral" variant="ghost" @click="modalSalvarLista = false" />
+                <UButton type="submit" label="Salvar lista" :loading="salvandoLista" :disabled="novaLista.nome.trim().length < 2" />
+              </div>
+            </form>
+          </template>
+        </UModal>
 
         <!-- Padronizacao: vale para a lista inteira, e nome e empresa sao independentes -->
         <div v-if="totalCarrinho" class="rounded-lg border border-default bg-elevated/40 p-3">
@@ -1319,10 +1621,29 @@ async function criarLote() {
 
     <!-- PASSO 2 -->
     <UCard v-show="passo === 2">
-      <template #header><h2 class="font-semibold">2. Anexo (opcional)</h2></template>
+      <template #header><h2 class="font-semibold">2. Anexo</h2></template>
 
       <div class="space-y-5">
+        <!-- como vai o anexo -->
+        <div class="grid gap-3 md:grid-cols-3">
+          <button
+            v-for="m in MODOS_ANEXO"
+            :key="m.valor"
+            type="button"
+            class="flex items-start gap-3 rounded-lg border p-3 text-left transition"
+            :class="modoAnexo === m.valor ? 'border-primary ring-1 ring-primary' : 'border-default hover:border-primary/40'"
+            @click="escolherModoAnexo(m.valor)"
+          >
+            <UIcon :name="m.icone" class="mt-0.5 size-5 shrink-0" :class="modoAnexo === m.valor ? 'text-primary' : 'text-muted'" />
+            <span>
+              <span class="block text-sm font-medium">{{ m.titulo }}</span>
+              <span class="block text-xs text-muted">{{ m.texto }}</span>
+            </span>
+          </button>
+        </div>
+
         <UAlert
+          v-if="modoAnexo !== 'nenhum'"
           color="info"
           variant="subtle"
           icon="i-lucide-info"
@@ -1330,6 +1651,16 @@ async function criarLote() {
           description="Ele fica em área privada e só é entregue pela página com token — é assim que conseguimos registrar quem baixou."
         />
 
+        <AnexoIndividual
+          v-if="modoAnexo === 'individual'"
+          v-model:arquivos="arquivosIndividuais"
+          v-model:manuais="ligacoesManuais"
+          v-model:enviar-sem-arquivo="enviarSemArquivo"
+          :destinatarios="listaProcessada.validos"
+          :casamento="casamento"
+        />
+
+        <template v-if="modoAnexo === 'unico'">
         <div class="rounded-lg border border-dashed border-default p-6 text-center">
           <UIcon name="i-lucide-file-up" class="mx-auto size-10 text-muted" />
           <p class="mt-2 text-sm font-medium">Envie o arquivo deste lote</p>
@@ -1365,11 +1696,11 @@ async function criarLote() {
 
         <UAlert
           v-if="!arquivoNome"
-          color="neutral"
+          color="warning"
           variant="subtle"
-          icon="i-lucide-megaphone"
-          title="Nenhum arquivo selecionado"
-          description="Siga assim para mandar só um aviso: a página registra a ciência do destinatário e o e-mail não precisa do botão de acesso."
+          icon="i-lucide-file-question"
+          title="Escolha o arquivo"
+          description="Envie um arquivo ou reutilize um já enviado. Para mandar só um aviso, escolha “Sem anexo”."
         />
         <div
           v-else
@@ -1388,6 +1719,16 @@ async function criarLote() {
             @click="removerAnexo"
           />
         </div>
+        </template>
+
+        <UAlert
+          v-if="modoAnexo === 'nenhum'"
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-megaphone"
+          title="Envio sem anexo (comunicado)"
+          description="A página registra a ciência do destinatário, e o e-mail não precisa do botão de acesso — mas ele é recomendado: o “Confirmar recebimento” é a prova de que o cliente recebeu."
+        />
       </div>
     </UCard>
 
@@ -1427,6 +1768,13 @@ async function criarLote() {
       <template #header><h2 class="font-semibold">4. Revisão e disparo</h2></template>
 
       <div class="space-y-5">
+        <AvisoDominios
+          :emails="emailsDaLista"
+          @corrigir="corrigirDominio"
+          @remover="removerEmails"
+          @problemas="n => (dominiosSemEmail = n)"
+        />
+
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField label="Nome do lote" help="Para você identificar no relatório.">
             <UInput v-model="nomeLote" class="w-full" />
@@ -1436,12 +1784,12 @@ async function criarLote() {
           </UFormField>
         </div>
 
-        <!-- De qual conta sai o e-mail -->
+        <!-- De qual canal sai o e-mail -->
         <UFormField
-          label="Conta de envio"
+          label="Sai por (canal de saída)"
           :help="contaEscolhida
             ? `Os e-mails sairão de ${contaEscolhida.remetente}.`
-            : 'Nenhuma conta cadastrada: será usada a configuração do .env.'"
+            : 'Nenhum canal cadastrado: será usada a configuração do .env.'"
         >
           <div class="flex flex-wrap items-center gap-2">
             <USelect
@@ -1451,8 +1799,9 @@ async function criarLote() {
               class="min-w-64"
             />
             <UButton
+              v-if="eAdmin"
               to="/admin/configuracoes"
-              :label="itensConta.length ? 'Gerenciar contas' : 'Cadastrar uma conta'"
+              :label="itensConta.length ? 'Gerenciar canais' : 'Cadastrar um canal'"
               icon="i-lucide-settings"
               color="neutral"
               variant="outline"
@@ -1461,7 +1810,36 @@ async function criarLote() {
           </div>
         </UFormField>
 
+        <!-- Para onde vão as respostas: pode ser outro endereço que não o da saída -->
+        <div class="grid gap-3 sm:grid-cols-2">
+          <UFormField
+            label="Respostas para"
+            help="Quando o cliente clicar em Responder, a mensagem vai para este endereço."
+          >
+            <USelect v-model="respostaModo" :items="itensResposta" class="w-full" />
+          </UFormField>
+          <UFormField
+            v-if="respostaModo === OUTRO"
+            label="Endereço de resposta"
+            :error="respostaOutro && respostaInvalida ? 'E-mail inválido' : undefined"
+          >
+            <UInput v-model="respostaOutro" type="email" placeholder="setor@contabilgaulke.com.br" class="w-full" />
+          </UFormField>
+        </div>
+
         <div class="space-y-3">
+          <UCheckbox
+            v-model="criarTickets"
+            label="Abrir chamado no painel quando o cliente responder ou não confirmar a leitura"
+            :help="`O chamado sai em seu nome.${contaEscolhida?.criarTickets ? ` Após ${contaEscolhida.diasSemConfirmacao} dia(s) sem confirmação, abre um chamado com quem falta.` : ''}`"
+          />
+          <UAlert
+            v-if="criarTickets && caixaNaoMonitorada"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-inbox"
+            description="As respostas vão para uma caixa que o sistema não monitora: respostas de clientes não serão vistas nem viram chamado. Escolha em “Respostas para” uma caixa de canal com monitoramento ligado."
+          />
           <UCheckbox
             v-model="exigirConfirmacao"
             label="Exigir confirmação de leitura antes de liberar o download"
@@ -1472,6 +1850,23 @@ async function criarLote() {
             label="Pedir confirmação de leitura ao cliente de e-mail do destinatário"
             help="A maioria dos clientes ignora o pedido, e os que respeitam mostram um aviso que a pessoa pode recusar. Use só quando o atrito valer a pena."
           />
+          <div class="rounded-lg border border-default p-3">
+            <UCheckbox
+              v-model="lembreteLigado"
+              :disabled="!temBotaoDeAcesso"
+              label="Lembrar automaticamente quem não confirmar"
+              :help="temBotaoDeAcesso
+                ? 'O mesmo e-mail sai de novo, com “Lembrete:” no assunto e o mesmo link. Só em dia útil, das 8h às 18h.'
+                : 'O e-mail está sem o botão de acesso: sem ele não há como confirmar, então não há o que lembrar.'"
+            />
+            <div v-if="lembreteLigado && temBotaoDeAcesso" class="mt-3 flex flex-wrap items-center gap-2 pl-6 text-sm">
+              <span class="text-muted">A cada</span>
+              <UInput v-model.number="lembreteDias" type="number" min="1" max="30" class="w-16" />
+              <span class="text-muted">dia(s), no máximo</span>
+              <UInput v-model.number="lembreteMax" type="number" min="1" max="5" class="w-14" />
+              <span class="text-muted">lembrete(s) por pessoa.</span>
+            </div>
+          </div>
         </div>
 
         <div class="grid gap-3 sm:grid-cols-4">
@@ -1530,7 +1925,7 @@ async function criarLote() {
           </div>
 
           <template v-if="quandoDisparar === 'agendar'">
-            <UFormField label="Data e hora" help="No seu fuso horário.">
+            <UFormField label="Data e hora" help="Horário de Brasília (São Paulo).">
               <UInput v-model="dataAgendada" type="datetime-local" class="w-full sm:w-72" />
             </UFormField>
 
@@ -1547,7 +1942,7 @@ async function criarLote() {
               color="info"
               variant="subtle"
               icon="i-lucide-calendar-check"
-              :title="`Disparo em ${new Date(agendadoParaISO!).toLocaleString('pt-BR')}`"
+              :title="`Disparo em ${formatarDataHora(agendadoParaISO)} (horário de Brasília)`"
               description="Se o sistema estiver fora do ar na hora marcada, ele dispara ao voltar — desde que o atraso seja pequeno. Passando disso, o lote fica pausado esperando você confirmar."
             />
           </template>
@@ -1586,9 +1981,11 @@ async function criarLote() {
         :label="quandoDisparar === 'agendar' ? 'Agendar lote' : 'Criar lote'"
         :icon="quandoDisparar === 'agendar' ? 'i-lucide-calendar-clock' : 'i-lucide-rocket'"
         :loading="criando"
-        :disabled="!listaProcessada.validos.length || !agendamentoValido"
-        @click="criarLote"
+        :disabled="!listaProcessada.validos.length || !agendamentoValido || respostaInvalida"
+        @click="confirmando = true"
       />
     </div>
+
+    <ModalConfirmarEnvio v-model:open="confirmando" :resumo="resumoEnvio" :carregando="criando" @confirmar="criarLote" />
   </div>
 </template>

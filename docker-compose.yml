@@ -42,6 +42,22 @@ services:
       # Elas NAO ficam em public/brand justamente por isso: aquele diretorio e
       # assado na imagem e nao tem como persistir o que for enviado pela tela.
       - imagens:/app/storage/imagens
+      # Documentos enviados pelos clientes nas solicitacoes (pastas por
+      # cliente). E o arquivo da empresa: perder este volume e perder os
+      # documentos societarios, de DP e de IRPF recebidos.
+      - documentos:/app/storage/documentos
+
+    environment:
+      DOCUMENTOS_DIR: /app/storage/documentos
+      # o app fala com o clamd pela rede interna do compose, pelo nome do servico
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: '3310'
+
+    depends_on:
+      clamav:
+        # o app sobe mesmo com o antivirus ainda carregando as assinaturas: o
+        # upload fica em quarentena e e verificado quando o clamd responder
+        condition: service_started
 
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/admin/sessao']
@@ -56,8 +72,34 @@ services:
         max-size: '10m'
         max-file: '5'
 
+  # Antivirus dos arquivos que os clientes enviam. O clamd leva 1-3 min para
+  # carregar as assinaturas no boot e usa ~1,5 GB de RAM; o freshclam dentro
+  # da mesma imagem atualiza as assinaturas sozinho. Nenhuma porta publicada:
+  # so o app, pela rede interna do compose, fala com ele.
+  clamav:
+    image: clamav/clamav:stable
+    container_name: gaulke-email-confirma-clamav
+    restart: unless-stopped
+    volumes:
+      - clamav:/var/lib/clamav
+    healthcheck:
+      test: ['CMD', 'clamdcheck.sh']
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
 volumes:
   arquivos:
     name: gaulke-email-confirma-arquivos
   imagens:
     name: gaulke-email-confirma-imagens
+  documentos:
+    name: gaulke-email-confirma-documentos
+  clamav:
+    name: gaulke-email-confirma-clamav

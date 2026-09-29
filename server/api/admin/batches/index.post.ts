@@ -7,19 +7,48 @@ import { stat } from 'node:fs/promises'
 import { registrarEvento } from '../../../utils/tracking'
 import { renderizarBlocos } from '../../../utils/blocos'
 import { blocosSchema, faltaBotaoDeAcesso, MSG_BOTAO_OBRIGATORIO } from '../../../utils/blocos-schema'
+import { auditar } from '../../../utils/auditoria'
+import { suprimidos } from '../../../utils/supressao'
 
 const schema = z.object({
   nome: z.string().min(1).max(200),
   templateId: z.number().int().optional().nullable(),
   // conta de envio; ausente usa a padrao das configuracoes
   contaId: z.number().int().optional().nullable(),
+  // abrir chamado no painel (resposta / sem confirmacao); ausente = o do canal
+  criarTickets: z.boolean().optional(),
+  /**
+   * "Respostas para": sai por um canal e as respostas vao para outro endereco
+   * (o do setor, por exemplo). Aceita "email@x" ou "Nome <email@x>". Ausente =
+   * o reply-to do proprio canal.
+   */
+  responderPara: z
+    .string()
+    .trim()
+    .max(300)
+    .refine(v => v === '' || /^[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+$|<[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+>\s*$/.test(v), {
+      message: 'Endereço de resposta inválido'
+    })
+    .nullish(),
   assunto: z.string().min(1).max(300),
   html: z.string().min(1),
   arquivoNome: z.string().optional().nullable(),
   arquivoOriginal: z.string().optional().nullable(),
+  /**
+   * nenhum (comunicado) | unico (um arquivo para todos) | individual (cada
+   * destinatario com o SEU arquivo, em destinatarios[].arquivoNome)
+   */
+  modoAnexo: z.enum(['nenhum', 'unico', 'individual']).optional(),
+  /** individual: quem ficou sem arquivo recebe o e-mail mesmo assim (sem anexo) */
+  enviarSemArquivo: z.boolean().default(false),
   intervaloMs: z.number().int().min(1000).max(600000).default(10000),
   exigirConfirmacao: z.boolean().default(true),
   pedirRecibo: z.boolean().default(false),
+  /**
+   * Lembrete automatico a quem nao confirmou: a cada N dias, ate `max` vezes,
+   * so em dia util das 8h as 18h. Ausente = sem lembrete.
+   */
+  lembrete: z.object({ dias: z.number().int().min(1).max(30), max: z.number().int().min(1).max(5) }).nullish(),
   // ISO 8601 com fuso; presente = o lote ja nasce agendado
   agendadoPara: z.string().datetime({ offset: true }).nullish(),
   // snapshot do editor visual, para reabrir o lote depois
@@ -39,7 +68,11 @@ const schema = z.object({
         email: z.string().email(),
         nome: z.string().optional().default(''),
         empresa: z.string().optional().default(''),
-        extras: z.record(z.string()).optional()
+        extras: z.record(z.string()).optional(),
+        // CPF/CNPJ (so digitos ou com pontuacao) e o arquivo individual
+        documento: z.string().max(20).nullish(),
+        arquivoNome: z.string().max(260).nullish(),
+        arquivoOriginal: z.string().max(260).nullish()
       })
     )
     .min(1)
@@ -55,7 +88,29 @@ export default defineEventHandler(async event => {
    * anuncia um documento que o destinatario nao tem como alcancar. Sem anexo a
    * regra nao se aplica — e um comunicado, e o botao e opcional.
    */
-  if (dados.arquivoNome && dados.formato === 'blocos' && dados.blocos?.length) {
+  const modoAnexo = dados.modoAnexo ?? (dados.arquivoNome ? 'unico' : 'nenhum')
+  const comArquivoIndividual = dados.destinatarios.filter(d => d.arquivoNome)
+  if (modoAnexo === 'individual') {
+    if (!comArquivoIndividual.length) {
+      throw createError({ statusCode: 400, statusMessage: 'Nenhum destinatário tem arquivo individual ligado.' })
+    }
+    const sem = dados.destinatarios.length - comArquivoIndividual.length
+    if (sem && !dados.enviarSemArquivo) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `${sem} destinatário(s) ficaram sem arquivo. Ligue um arquivo a cada um, remova-os, ou marque "enviar sem anexo para quem ficou sem arquivo".`
+      })
+    }
+    // cada arquivo precisa existir de verdade no storage, antes de criar o lote
+    for (const d of comArquivoIndividual) {
+      const info = await stat(caminhoNoStorage(d.arquivoNome!)).catch(() => null)
+      if (!info?.isFile()) {
+        throw createError({ statusCode: 400, statusMessage: `Arquivo de ${d.email} não encontrado no servidor (${d.arquivoOriginal ?? d.arquivoNome}). Envie de novo.` })
+      }
+    }
+  }
+
+  if ((dados.arquivoNome || modoAnexo === 'individual') && dados.formato === 'blocos' && dados.blocos?.length) {
     if (faltaBotaoDeAcesso(dados.blocos)) {
       throw createError({ statusCode: 400, statusMessage: MSG_BOTAO_OBRIGATORIO })
     }
@@ -77,6 +132,7 @@ export default defineEventHandler(async event => {
    */
   let contaId: number | null = null
   let contaNome: string | null = null
+  let canalCriaTickets = false
   if (dados.contaId) {
     const [c] = await db.select().from(accounts).where(eq(accounts.id, dados.contaId))
     if (!c) throw createError({ statusCode: 400, statusMessage: 'Conta de envio nao encontrada' })
@@ -85,6 +141,7 @@ export default defineEventHandler(async event => {
     }
     contaId = c.id
     contaNome = c.nome
+    canalCriaTickets = c.criarTickets
   } else {
     const [padrao] = await db
       .select()
@@ -94,6 +151,7 @@ export default defineEventHandler(async event => {
     if (padrao) {
       contaId = padrao.id
       contaNome = padrao.nome
+      canalCriaTickets = padrao.criarTickets
     }
   }
 
@@ -112,6 +170,21 @@ export default defineEventHandler(async event => {
     dados.formato === 'blocos' && dados.blocos?.length
       ? renderizarBlocos(dados.blocos as never, dados.assunto)
       : dados.html
+
+  // lembrete e "voce ainda nao confirmou": sem o botao nao ha como confirmar,
+  // e todo mundo receberia lembrete ate o limite
+  if (dados.lembrete) {
+    const semBotao =
+      dados.formato === 'blocos' && dados.blocos?.length
+        ? faltaBotaoDeAcesso(dados.blocos)
+        : !/\{\{\s*link\s*\}\}/.test(html)
+    if (semBotao) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'O lembrete automático precisa do botão de acesso no e-mail: é por ele que a pessoa confirma o recebimento.'
+      })
+    }
+  }
 
   if (dados.templateId) {
     const t = (await db.select({ id: templates.id }).from(templates).where(eq(templates.id, dados.templateId)))[0]
@@ -134,11 +207,22 @@ export default defineEventHandler(async event => {
       criadoPorNome: operador?.nome ?? null,
       contaId,
       contaNome,
-      arquivoPath: dados.arquivoNome ?? null,
-      arquivoNome: dados.arquivoOriginal || dados.arquivoNome || null,
+      responderPara: dados.responderPara || null,
+      criarTickets: dados.criarTickets ?? canalCriaTickets,
+      modoAnexo,
+      // no individual o arquivo e de cada destinatario; o lote nao tem um so
+      arquivoPath: modoAnexo === 'unico' ? dados.arquivoNome ?? null : null,
+      arquivoNome:
+        modoAnexo === 'unico'
+          ? dados.arquivoOriginal || dados.arquivoNome || null
+          : modoAnexo === 'individual'
+            ? `Arquivo individual (${comArquivoIndividual.length} destinatário(s))`
+            : null,
       intervaloMs: dados.intervaloMs,
       exigirConfirmacao: dados.exigirConfirmacao ? 'true' : 'false',
       pedirRecibo: dados.pedirRecibo ? 'true' : 'false',
+      lembreteDias: dados.lembrete?.dias ?? null,
+      lembreteMax: dados.lembrete?.max ?? 0,
       status: dados.agendadoPara ? 'agendado' : 'rascunho',
       agendadoPara: dados.agendadoPara ? new Date(dados.agendadoPara) : null,
       agendadoEm: dados.agendadoPara ? new Date() : null,
@@ -149,8 +233,13 @@ export default defineEventHandler(async event => {
   // dedupe final no servidor: a UI pode ter sido burlada
   const vistos = new Set<string>()
   const linhas = []
+  // enderecos suprimidos (devolveram definitivamente) ficam de fora: a tela ja
+  // avisa antes; aqui e a garantia
+  const bloqueados = new Set((await suprimidos(dados.destinatarios.map(d => d.email))).map(s => s.email))
+  let ignoradosSupressao = 0
   for (const d of dados.destinatarios) {
     const email = d.email.trim().toLowerCase()
+    if (bloqueados.has(email)) { ignoradosSupressao++; continue }
     if (vistos.has(email)) continue
     vistos.add(email)
     linhas.push({
@@ -158,10 +247,21 @@ export default defineEventHandler(async event => {
       email,
       nome: d.nome || null,
       empresa: d.empresa || null,
+      documento: soDigitos(d.documento) ?? null,
+      arquivoPath: modoAnexo === 'individual' ? d.arquivoNome ?? null : null,
+      arquivoNome: modoAnexo === 'individual' ? d.arquivoOriginal || d.arquivoNome || null : null,
       dadosExtras: (d.extras && Object.keys(d.extras).length ? d.extras : null) as never,
       token: novoToken(),
       codigo: novoCodigo(),
       status: 'pendente'
+    })
+  }
+
+  if (!linhas.length) {
+    await db.delete(batches).where(eq(batches.id, lote!.id))
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Todos os destinatários estão na lista de supressão (devolveram definitivamente). Corrija os e-mails.'
     })
   }
 
@@ -176,5 +276,23 @@ export default defineEventHandler(async event => {
   }
   await Promise.all(inseridos.map(r => registrarEvento(r.id, 'enfileirado')))
 
-  return { lote: { ...lote!, total: inseridos.length }, destinatarios: inseridos.length }
+  await auditar(event, 'lote.criar', {
+    entidade: 'lote',
+    id: lote!.id,
+    resumo:
+      `Criou o lote "${lote!.nome}" com ${inseridos.length} destinatário(s)` +
+      (lote!.agendadoPara ? `, agendado para ${formatarDataHora(lote!.agendadoPara)}` : ''),
+    dados: {
+      assunto: dados.assunto,
+      total: inseridos.length,
+      canal: contaNome,
+      responderPara: dados.responderPara || null,
+      arquivo: lote!.arquivoNome,
+      lembrete: dados.lembrete ?? null,
+      templateId: dados.templateId ?? null,
+      agendadoPara: dados.agendadoPara ?? null
+    }
+  })
+
+  return { lote: { ...lote!, total: inseridos.length }, destinatarios: inseridos.length, ignoradosSupressao }
 })

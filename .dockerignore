@@ -6,3 +6,9 @@ node_modules
 .env.production
 storage/files/*
 *.log
+
+# certificados digitais nunca entram na imagem
+cert/
+*.pfx
+*.p12
+*.key

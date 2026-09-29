@@ -5,6 +5,9 @@ import { estadoMigrations } from '../../utils/migrations'
 import { saudePainel } from '../../utils/sessao-painel'
 import { resolverConta } from '../../utils/mailer'
 import { chaveConfigurada } from '../../utils/cripto'
+import { useDb, accounts, ticketsPainel } from '../../db'
+import { eq, sql } from 'drizzle-orm'
+import { estadoAntivirus } from '../../utils/antivirus'
 
 /** Diagnostico rapido: SMTP, URL publica, workers ativos e sessao do painel. */
 export default defineEventHandler(async event => {
@@ -35,6 +38,40 @@ export default defineEventHandler(async event => {
     // acoplamento com o painel: falha aqui e silenciosa, por isso e exibida
     painel: await saudePainel(event),
     // resultado do boot: se falhou, aparece na barra do admin
-    migrations: estadoMigrations()
+    migrations: estadoMigrations(),
+    // monitor da caixa: um canal que parou de ler precisa aparecer na barra
+    caixa: await useDb()
+      .select({
+        conta: accounts.nome,
+        ultimaLeituraEm: accounts.imapUltimaLeituraEm,
+        erro: accounts.imapUltimoErro,
+        erroEm: accounts.imapUltimoErroEm
+      })
+      .from(accounts)
+      .where(eq(accounts.monitorarCaixa, true))
+      .catch(() => []),
+    // chamados no painel que nao conseguiram sair
+    chamados: (
+      await useDb()
+        .select({
+          pendentes: sql<number>`count(*) filter (where ${ticketsPainel.statusEnvio} = 'pendente')::int`,
+          erros: sql<number>`count(*) filter (where ${ticketsPainel.statusEnvio} = 'erro')::int`
+        })
+        .from(ticketsPainel)
+        .catch(() => [{ pendentes: 0, erros: 0 }])
+    )[0],
+    // antivirus das solicitacoes: fora do ar, os arquivos dos clientes ficam
+    // presos na quarentena ate ele voltar
+    antivirus: {
+      ...(await estadoAntivirus()),
+      quarentena:
+        (
+          await useDb()
+            .execute<{ n: number }>(
+              sql`select count(*)::int as n from sys_mail_solic_arquivos where antivirus in ('pendente', 'erro') and removido_em is null`
+            )
+            .catch(() => [{ n: 0 }])
+        )[0]?.n ?? 0
+    }
   }
 })

@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { useDb, recipients, batches } from '../../../db'
 import { registrarEventoDoRequest } from '../../../utils/tracking'
+import { foraDaLixeira } from '../../../utils/lotes'
 
 /** Dados da landing page. Registra o evento de ACESSO (sinal confiavel). */
 export default defineEventHandler(async event => {
@@ -18,12 +19,16 @@ export default defineEventHandler(async event => {
         downloadCount: recipients.downloadCount,
         arquivoNome: batches.arquivoNome,
         arquivoPath: batches.arquivoPath,
+        // anexo individual: o arquivo DESTA pessoa vale mais que o do lote
+        arquivoProprioNome: recipients.arquivoNome,
+        arquivoProprioPath: recipients.arquivoPath,
         exigirConfirmacao: batches.exigirConfirmacao,
         loteNome: batches.nome
       })
       .from(recipients)
       .innerJoin(batches, eq(batches.id, recipients.batchId))
-      .where(eq(recipients.token, token))
+      // lote na lixeira responde igual a token inexistente
+      .where(and(eq(recipients.token, token), foraDaLixeira))
   )[0]
 
   // Mensagem neutra: nao revela se o token existe ou nao
@@ -38,8 +43,8 @@ export default defineEventHandler(async event => {
     empresa: linha.empresa,
     codigo: linha.codigo,
     loteNome: linha.loteNome,
-    arquivoNome: linha.arquivoNome,
-    temArquivo: !!linha.arquivoPath,
+    arquivoNome: linha.arquivoProprioPath ? linha.arquivoProprioNome : linha.arquivoNome,
+    temArquivo: !!(linha.arquivoProprioPath || linha.arquivoPath),
     exigirConfirmacao: linha.exigirConfirmacao === 'true',
     confirmado: !!linha.confirmedAt,
     confirmadoEm: linha.confirmedAt,

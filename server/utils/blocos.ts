@@ -1,4 +1,4 @@
-import type { Alinhamento, Bloco, CorAviso } from '../../shared/types/blocos'
+import type { Alinhamento, AlinhamentoTexto, Bloco, CorAviso } from '../../shared/types/blocos'
 
 /**
  * Gera o HTML do e-mail a partir dos blocos do editor visual.
@@ -44,6 +44,26 @@ const ALINHAR: Record<Alinhamento, string> = {
   direita: 'right'
 }
 
+/**
+ * Estilo do texto corrido. Justificado e o PADRAO da comunicacao da empresa
+ * (inclusive para blocos gravados antes da opcao existir, que nao tem o
+ * campo), em qualquer tela — celular incluido, por decisao da empresa. Quem
+ * monta o e-mail pode escolher outro alinhamento por bloco.
+ *
+ * A hifenizacao (o <html lang="pt-BR"> diz o idioma das regras) reduz os
+ * "rios" de espaco que a justificacao abre em coluna estreita.
+ */
+function estiloTexto(a: AlinhamentoTexto | undefined) {
+  const alinhamento = a ?? 'justificado'
+  if (alinhamento === 'justificado') {
+    return {
+      classe: '',
+      estilo: 'text-align:justify;-webkit-hyphens:auto;-ms-hyphens:auto;hyphens:auto;'
+    }
+  }
+  return { classe: '', estilo: `text-align:${alinhamento === 'centro' ? 'center' : 'left'};` }
+}
+
 const CORES_AVISO: Record<CorAviso, { fundo: string; borda: string; texto: string }> = {
   neutro: { fundo: FUNDO_SUAVE, borda: BORDA, texto: TEXTO },
   atencao: { fundo: '#fffbeb', borda: '#fcd34d', texto: '#92400e' },
@@ -80,13 +100,15 @@ function renderizarBloco(b: Bloco): string {
               </td>
             </tr>`
 
-    case 'texto':
+    case 'texto': {
+      const t = estiloTexto(b.alinhamento)
       return `
             <tr>
               <td style="padding:16px 32px 0 32px;">
-                <p style="margin:0;font-size:15px;line-height:1.7;color:${TEXTO};">${comQuebras(b.texto)}</p>
+                <p${t.classe} style="margin:0;font-size:15px;line-height:1.7;color:${TEXTO};${t.estilo}">${comQuebras(b.texto)}</p>
               </td>
             </tr>`
+    }
 
     case 'botao':
       // o destino e sempre {{link}}: e o que da sentido ao sistema inteiro,
@@ -130,13 +152,14 @@ function renderizarBloco(b: Bloco): string {
 
     case 'aviso': {
       const c = CORES_AVISO[b.cor] ?? CORES_AVISO.neutro
+      const t = estiloTexto(b.alinhamento)
       return `
             <tr>
               <td style="padding:16px 32px 0 32px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${c.fundo};border:1px solid ${c.borda};border-radius:8px;">
                   <tr>
                     <td style="padding:14px 16px;">
-                      <p style="margin:0;font-size:14px;line-height:1.6;color:${c.texto};">${comQuebras(b.texto)}</p>
+                      <p${t.classe} style="margin:0;font-size:14px;line-height:1.6;color:${c.texto};${t.estilo}">${comQuebras(b.texto)}</p>
                     </td>
                   </tr>
                 </table>
@@ -145,11 +168,12 @@ function renderizarBloco(b: Bloco): string {
     }
 
     case 'lista': {
+      const t = estiloTexto(b.alinhamento)
       const itens = b.itens
         .filter(i => i.trim())
         .map(
           i =>
-            `<li style="margin:0 0 6px 0;font-size:15px;line-height:1.6;color:${TEXTO};">${comQuebras(i)}</li>`
+            `<li${t.classe} style="margin:0 0 6px 0;font-size:15px;line-height:1.6;color:${TEXTO};${t.estilo}">${comQuebras(i)}</li>`
         )
         .join('')
       if (!itens) return ''

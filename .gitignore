@@ -14,3 +14,10 @@ deploy
 dist-docker*
 *.tar
 storage
+
+# Certificados digitais (A1 .pfx/.p12) e chaves: NUNCA no repositorio.
+# Um e-CNPJ vazado assina em nome da empresa.
+cert/
+*.pfx
+*.p12
+*.key

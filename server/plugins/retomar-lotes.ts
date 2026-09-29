@@ -1,10 +1,12 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { useDb, batches } from '../db'
+import { foraDaLixeira } from '../utils/lotes'
 import { destravarOrfaos, iniciarLote } from '../utils/sender'
 import { checarBaseUrl, checarAlcancePublico } from '../utils/urls'
 import { garantirTemplatePadrao } from '../utils/seed'
 import { importarContaDoEnv } from '../utils/contas'
 import { iniciarAgendador } from '../utils/agendador'
+import { iniciarMonitorCaixa } from '../utils/caixa/monitor'
 import { aplicarMigrations } from '../utils/migrations'
 
 /**
@@ -60,7 +62,7 @@ export default defineNitroPlugin(async () => {
     const emAndamento = await useDb()
       .select({ id: batches.id, nome: batches.nome })
       .from(batches)
-      .where(eq(batches.status, 'enviando'))
+      .where(and(eq(batches.status, 'enviando'), foraDaLixeira))
 
     for (const lote of emAndamento) {
       console.info(`[gaulke-mail] retomando lote #${lote.id} (${lote.nome})`)
@@ -70,6 +72,8 @@ export default defineNitroPlugin(async () => {
     // depois da retomada: um lote agendado que venceu durante a queda e
     // avaliado agora, respeitando a tolerancia de atraso
     iniciarAgendador()
+    // le a caixa dos canais com "monitorar caixa" ligado (somente leitura)
+    iniciarMonitorCaixa()
   } catch (e) {
     console.error('[gaulke-mail] falha ao retomar lotes:', e instanceof Error ? e.message : e)
   }

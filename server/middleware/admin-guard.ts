@@ -1,16 +1,22 @@
 import { sessaoValida } from '../utils/auth'
-import { podeOperar, temCookieDoPainel, usuarioDaSessaoPainel } from '../utils/sessao-painel'
+import { temCookieDoPainel, usuarioDaSessaoPainel } from '../utils/sessao-painel'
+import { operadorDoPainel, OPERADOR_SENHA_LOCAL } from '../utils/permissoes'
+import { lerConfig } from '../utils/config'
 
 /**
- * Protege as APIs administrativas.
+ * Protege as APIs administrativas e identifica QUEM esta operando.
  *
  * Duas credenciais sao aceitas, nesta ordem:
  *
  *  1. SESSAO DO PAINEL — o cookie gaulke_auth_session chega sozinho neste
- *     subdominio. Se corresponder a uma sessao viva de admin ou supervisor, o
- *     acesso e liberado SEM senha e passamos a saber QUEM esta operando.
- *  2. SENHA DO .env — reserva. Cobre o desenvolvimento por IP (onde o cookie
- *     nao e enviado) e o caso do painel estar fora do ar.
+ *     subdominio. Qualquer usuario ATIVO do painel entra (decisao D1): o
+ *     sistema virou a plataforma de comunicacao da empresa, e nao mais uma
+ *     ferramenta de admin. O PAPEL (admin, supervisor, usuario) segue junto em
+ *     event.context.operador e cada rota sensivel o confere com exigirPapel().
+ *  2. SENHA LOCAL DO .env — so para emergencia (decisao D3): painel fora do ar
+ *     ou acesso por IP no desenvolvimento, onde o cookie nao e enviado. Opera
+ *     como admin, aparece na auditoria como "Acesso por senha local" e o admin
+ *     pode desliga-la em Configuracoes.
  *
  * As rotas de tracking (/api/c/**) e o login ficam de fora: sao publicas por
  * natureza.
@@ -21,20 +27,23 @@ export default defineEventHandler(async event => {
   if (path === '/api/admin/login' || path === '/api/admin/sessao') return
 
   const usuario = await usuarioDaSessaoPainel(event)
-
   if (usuario) {
-    if (!podeOperar(usuario)) {
-      throw createError({
-        statusCode: 403,
-        statusMessage: 'O envio de comunicados e restrito a administradores e supervisores.',
-      })
-    }
-    // fica disponivel para os handlers gravarem a autoria do lote
-    event.context.operador = usuario
+    event.context.operador = operadorDoPainel(usuario)
     return
   }
 
-  if (sessaoValida(event)) return
+  if (sessaoValida(event)) {
+    // desligar a senha pela tela derruba tambem quem ja estava dentro por ela,
+    // e nao so os logins novos — senao "desligar" levaria ate 12h para valer
+    if (!(await lerConfig('senha_local_habilitada'))) {
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'O acesso por senha local foi desligado. Entre pelo painel.'
+      })
+    }
+    event.context.operador = OPERADOR_SENHA_LOCAL
+    return
+  }
 
   // Mensagem diferente quando o cookie CHEGOU mas nao foi reconhecido: ajuda a
   // perceber que a sessao expirou (ou que o acoplamento com o painel quebrou),
@@ -42,7 +51,7 @@ export default defineEventHandler(async event => {
   throw createError({
     statusCode: 401,
     statusMessage: temCookieDoPainel(event)
-      ? 'Sessao do painel nao reconhecida ou expirada. Entre novamente no painel, ou use a senha.'
+      ? 'Sessao do painel nao reconhecida ou expirada. Entre novamente no painel.'
       : 'Nao autenticado',
   })
 })

@@ -84,15 +84,6 @@ export async function usuarioDaSessaoPainel(event: H3Event): Promise<UsuarioPain
   }
 }
 
-/**
- * Quem pode operar: admin ou supervisor. Um usuario comum do painel tem sessao
- * valida mas NAO dispara comunicado — o corte e o mesmo que usariamos se o
- * modulo vivesse dentro do painel.
- */
-export function podeOperar(u: UsuarioPainel) {
-  return u.isAdmin || u.isSupervisor
-}
-
 /** Como o painel chama o cookie aqui — o status mostra para facilitar o diagnostico. */
 export const nomeCookiePainel = COOKIE_PAINEL
 
@@ -136,11 +127,4 @@ export async function saudePainel(event: H3Event): Promise<SaudePainel> {
   }
 
   return { tabelaOk, cookie, nomeCookie: COOKIE_PAINEL, usuario: usuario?.nome ?? null, aviso }
-}
-
-declare module 'h3' {
-  interface H3EventContext {
-    /** Preenchido pelo admin-guard quando a entrada veio da sessao do painel. */
-    operador?: UsuarioPainel
-  }
 }
