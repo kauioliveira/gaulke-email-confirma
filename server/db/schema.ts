@@ -464,6 +464,8 @@ export const solicitacoes = pgTable('sys_mail_solic', {
   checklistId: integer('checklist_id').references(() => checklists.id, { onDelete: 'set null' }),
   destinatarioNome: varchar('destinatario_nome', { length: 200 }),
   destinatarioEmail: varchar('destinatario_email', { length: 320 }).notNull(),
+  // codigo publico SOL-26-X7K2P9: sorteado, nao revela o id (migration 0016)
+  codigo: varchar('codigo', { length: 20 }),
   documento: varchar('documento', { length: 20 }),
   empresa: varchar('empresa', { length: 200 }),
   token: varchar('token', { length: 36 }).notNull(),
@@ -600,6 +602,8 @@ export const assinDocumentos = pgTable('sys_mail_assin_documentos', {
   originalPaginas: integer('original_paginas'),
   finalPath: text('final_path'),
   finalSha256: char('final_sha256', { length: 64 }),
+  // codigo publico ASS-26-X7K2P9: sorteado, nao revela o id (migration 0015)
+  codigo: varchar('codigo', { length: 20 }),
   codigoVerificacao: varchar('codigo_verificacao', { length: 16 }).notNull(),
   contaId: integer('conta_id').references(() => accounts.id, { onDelete: 'set null' }),
   contaNome: varchar('conta_nome', { length: 120 }),
@@ -624,7 +628,8 @@ export const assinSignatarios = pgTable('sys_mail_assin_signatarios', {
   ordem: integer('ordem').default(1).notNull(),
   nome: varchar('nome', { length: 200 }).notNull(),
   email: varchar('email', { length: 320 }).notNull(),
-  cpf: varchar('cpf', { length: 11 }),
+  // CPF ou CNPJ: quem assina pode ser empresa
+  cpf: varchar('cpf', { length: 14 }),
   papel: varchar('papel', { length: 60 }),
   token: varchar('token', { length: 36 }).notNull(),
   status: varchar('status', { length: 20 }).default('pendente').notNull(),

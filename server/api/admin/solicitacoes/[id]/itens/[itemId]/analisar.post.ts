@@ -88,7 +88,7 @@ export default defineEventHandler(async event => {
   await auditar(event, `solicitacao.item_${d.acao}`, {
     entidade: 'solicitacao',
     id: s.id,
-    resumo: `${descricao} — ${codigoSolicitacao(s.id)} de ${s.destinatarioEmail}`,
+    resumo: `${descricao} — ${codigoSolicitacao(s)} de ${s.destinatarioEmail}`,
     dados: { itemId: item.id, acao: d.acao, motivo: d.motivo ?? null, statusAntes: item.status, solicitacao: r }
   })
   return { ok: true, status: r.depois }

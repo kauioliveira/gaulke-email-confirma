@@ -27,14 +27,23 @@ const enderecoDe = (de: string | null) => (de ?? '').replace(/.*</, '').replace(
 
 async function solicPorIds(codigos: string[]) {
   if (!codigos.length) return null
-  const [s] = await useDb().select().from(solicitacoes).where(inArray(solicitacoes.id, codigos.map(idDoCodigo))).limit(1)
-  return s ?? null
+  const [s] = await useDb().select().from(solicitacoes).where(inArray(solicitacoes.codigo, codigos)).limit(1)
+  if (s) return s
+  const antigos = codigos.filter(c => /^SOL-\d{6}$/.test(c)).map(idDoCodigo)
+  if (!antigos.length) return null
+  const [a] = await useDb().select().from(solicitacoes).where(inArray(solicitacoes.id, antigos)).limit(1)
+  return a ?? null
 }
 
 async function assinPorIds(codigos: string[]) {
   if (!codigos.length) return null
-  const [d] = await useDb().select().from(assinDocumentos).where(inArray(assinDocumentos.id, codigos.map(idDoCodigo))).limit(1)
-  return d ?? null
+  // o codigo e o da coluna; os antigos (ASS-000045) ainda caem no id
+  const [d] = await useDb().select().from(assinDocumentos).where(inArray(assinDocumentos.codigo, codigos)).limit(1)
+  if (d) return d
+  const antigos = codigos.filter(c => /^ASS-\d{6}$/.test(c)).map(idDoCodigo)
+  if (!antigos.length) return null
+  const [a] = await useDb().select().from(assinDocumentos).where(inArray(assinDocumentos.id, antigos)).limit(1)
+  return a ?? null
 }
 
 /** Quem, entre os signatarios, escreveu (resposta) ou falhou (devolucao). */

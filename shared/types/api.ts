@@ -117,8 +117,10 @@ export interface MensagemCaixa {
   /** resposta/devolucao de um e-mail de solicitacao ou de assinatura */
   solicId?: number | null
   solicTitulo?: string | null
+  solicCodigo?: string | null
   assinDocumentoId?: number | null
   assinTitulo?: string | null
+  assinCodigo?: string | null
   ticketCode: string | null
   ticketStatus: string | null
 }

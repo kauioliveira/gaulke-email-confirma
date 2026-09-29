@@ -25,6 +25,7 @@ import { caminhoDocumento, slugPasta, pastaDoCliente } from './documentos'
 import { certificadoParaAssinar } from './certificados'
 import { selarPdf } from './pades'
 import { emitirWebhook } from './webhooks'
+import { sortearCodigo } from './codigos'
 import type { Bloco } from '../../shared/types/blocos'
 import type {
   ResumoAssinatura,
@@ -49,7 +50,20 @@ const ALFABETO = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'
 const OTP_VALIDADE_MS = 10 * 60_000
 const OTP_MAX_TENTATIVAS = 5
 
-export const codigoAssinatura = (id: number) => `ASS-${String(id).padStart(6, '0')}`
+/**
+ * Codigo publico do documento: ASS-26-X7K2P9 (ano + 6 sorteados). Nao sai do
+ * id — ASS-000034 contava a quem recebia quantos documentos a Gaulke ja
+ * mandou assinar. O fallback so vale para linha sem codigo (nao deve haver:
+ * a migration 0015 preencheu as antigas).
+ */
+export const codigoAssinatura = (d: { id: number; codigo?: string | null }) => d.codigo ?? `ASS-${String(d.id).padStart(6, '0')}`
+
+/** Sorteia um codigo que ainda nao existe (veja utils/codigos.ts). */
+export function novoCodigoAssinatura() {
+  return sortearCodigo('ASS', async codigo =>
+    (await useDb().select({ id: assinDocumentos.id }).from(assinDocumentos).where(eq(assinDocumentos.codigo, codigo)).limit(1)).length > 0
+  )
+}
 export const linkAssinatura = (token: string, base = baseUrl()) => `${base}/a/${token}`
 export const linkValidacao = (codigo: string, base = baseUrl()) => `${base}/validar?c=${codigo}`
 
@@ -96,7 +110,7 @@ export const criarAssinaturaSchema = z.object({
           .string()
           .nullish()
           .transform(v => (v || '').replace(/\D/g, '') || null)
-          .refine(v => !v || v.length === 11, 'CPF deve ter 11 dígitos'),
+          .refine(v => !v || v.length === 11 || v.length === 14, 'CPF/CNPJ deve ter 11 ou 14 dígitos'),
         papel: z.string().trim().max(60).nullish().transform(v => v || null)
       })
     )
@@ -230,7 +244,7 @@ async function enviarEmailSignatario(
     email: s.email,
     empresa: '',
     link: linkAssinatura(s.token),
-    codigo: extra.codigo ?? codigoAssinatura(doc.id)
+    codigo: extra.codigo ?? codigoAssinatura(doc)
   })
   const conta = await resolverConta(doc.contaId)
   const dominio = (/@([^>\s]+)>?\s*$/.exec(conta.from)?.[1] || 'contabilgaulke.com.br').toLowerCase()
@@ -239,11 +253,11 @@ async function enviarEmailSignatario(
     para: s.email,
     assunto,
     html,
-    texto: [assunto, '', tipo === 'codigo' ? `Código: ${extra.codigo}` : `Acesse: ${linkAssinatura(s.token)}`, '', `Documento ${codigoAssinatura(doc.id)}`].join('\n'),
+    texto: [assunto, '', tipo === 'codigo' ? `Código: ${extra.codigo}` : `Acesse: ${linkAssinatura(s.token)}`, '', `Documento ${codigoAssinatura(doc)}`].join('\n'),
     responderPara: doc.responderPara,
-    messageId: `<${codigoAssinatura(doc.id)}.${tipo}.${randomInt(1e9).toString(36)}@${dominio}>`,
-    headers: { 'X-Gaulke-Assinatura': codigoAssinatura(doc.id) },
-    ...(extra.anexo ? { anexos: [{ nome: `${codigoAssinatura(doc.id)}_${slugPasta(doc.titulo, 50)}_assinado.pdf`, conteudo: extra.anexo, tipo: 'application/pdf' }] } : {})
+    messageId: `<${codigoAssinatura(doc)}.${tipo}.${randomInt(1e9).toString(36)}@${dominio}>`,
+    headers: { 'X-Gaulke-Assinatura': codigoAssinatura(doc) },
+    ...(extra.anexo ? { anexos: [{ nome: `${codigoAssinatura(doc)}_${slugPasta(doc.titulo, 50)}_assinado.pdf`, conteudo: extra.anexo, tipo: 'application/pdf' }] } : {})
   })
 }
 
@@ -397,7 +411,7 @@ export async function assinar(
   )
   await emitirWebhook(
     'assinatura.assinada',
-    { documentoId: doc.id, codigo: codigoAssinatura(doc.id), titulo: doc.titulo, signatario: { nome: s.nome, email: s.email, papel: s.papel }, assinadoEm: agora.toISOString() },
+    { documentoId: doc.id, codigo: codigoAssinatura(doc), titulo: doc.titulo, signatario: { nome: s.nome, email: s.email, papel: s.papel }, assinadoEm: agora.toISOString() },
     `/admin/assinaturas/${doc.id}`
   )
 
@@ -423,7 +437,7 @@ export async function recusar(doc: AssinDocumento, s: AssinSignatario, motivo: s
   await registrarEventoAssin(doc.id, 'recusado', `${s.nome} <${s.email}> recusou: ${texto}`, { signatarioId: s.id, ip: ctx.ip, userAgent: ctx.userAgent })
   await emitirWebhook(
     'assinatura.recusada',
-    { documentoId: doc.id, codigo: codigoAssinatura(doc.id), titulo: doc.titulo, signatario: { nome: s.nome, email: s.email }, motivo: texto },
+    { documentoId: doc.id, codigo: codigoAssinatura(doc), titulo: doc.titulo, signatario: { nome: s.nome, email: s.email }, motivo: texto },
     `/admin/assinaturas/${doc.id}`
   )
   await avisarQuemPediu(doc, `Assinatura recusada: ${doc.titulo}`, `${s.nome} (${s.email}) recusou assinar "${doc.titulo}".`, [`Motivo: ${texto}`])
@@ -443,10 +457,10 @@ export async function avisarQuemPediu(doc: AssinDocumento, assunto: string, text
     await enviarEmail({
       conta: await resolverConta(doc.contaId),
       para: doc.criadoPorEmail,
-      assunto: `[${codigoAssinatura(doc.id)}] ${assunto}`,
-      html: preencherEmail(renderizarBlocos(blocos, assunto), { nome: '', email: doc.criadoPorEmail, empresa: '', link, codigo: codigoAssinatura(doc.id) }),
+      assunto: `[${codigoAssinatura(doc)}] ${assunto}`,
+      html: preencherEmail(renderizarBlocos(blocos, assunto), { nome: '', email: doc.criadoPorEmail, empresa: '', link, codigo: codigoAssinatura(doc) }),
       texto: `${assunto}\n\n${texto}\n${lista.map(l => `- ${l}`).join('\n')}\n\n${link}`,
-      ...(anexo ? { anexos: [{ nome: `${codigoAssinatura(doc.id)}_assinado.pdf`, conteudo: anexo, tipo: 'application/pdf' }] } : {})
+      ...(anexo ? { anexos: [{ nome: `${codigoAssinatura(doc)}_assinado.pdf`, conteudo: anexo, tipo: 'application/pdf' }] } : {})
     })
   } catch (e) {
     console.error('[gaulke-mail] aviso da assinatura', doc.id, e instanceof Error ? e.message : e)
@@ -516,8 +530,12 @@ const iniciais = (nome: string) =>
     .join('')
     .slice(0, 4)
 
-function mascararCpf(cpf: string | null) {
-  return cpf && cpf.length === 11 ? `***.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-**` : null
+/** CPF sai mascarado (dado pessoal); CNPJ e publico e sai inteiro. */
+function documentoNaFolha(doc: string | null) {
+  if (!doc) return null
+  if (doc.length === 11) return `CPF ***.${doc.slice(3, 6)}.${doc.slice(6, 9)}-**`
+  if (doc.length === 14) return `CNPJ ${doc.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}`
+  return null
 }
 
 function dispositivo(ua: string | null) {
@@ -564,7 +582,7 @@ export async function montarPdfFinal(documentoId: number) {
     }
   }
   const paginasOriginais = pdf.getPageCount()
-  const codigo = codigoAssinatura(doc.id)
+  const codigo = codigoAssinatura(doc)
 
   // 1. campos
   for (const c of campos) {
@@ -644,7 +662,7 @@ export async function montarPdfFinal(documentoId: number) {
   campo('SHA-256 do original', doc.originalSha256 ?? '—')
   campo('Enviado por', `${doc.criadoPorNome ?? '—'} em ${formatarDataHora(doc.enviadoEm ?? doc.createdAt)}`)
   campo('Concluído em', `${formatarDataHora(new Date())} (horário de Brasília)`)
-  if (doc.clienteNome || doc.clienteDocumento) campo('Referente a', [doc.clienteNome, doc.clienteDocumento].filter(Boolean).join(' · '))
+  if (doc.clienteNome || doc.clienteDocumento) campo('Referente a', [doc.clienteNome, doc.clienteDocumento && formatarDocumento(doc.clienteDocumento)].filter(Boolean).join(' · '))
 
   y -= 10
   texto('Assinaturas', { tam: 12, f: negrito, cor: COR_MARCA })
@@ -657,7 +675,7 @@ export async function montarPdfFinal(documentoId: number) {
     const col = L - 2 * M - 190
     y -= 8
     texto(s.nome, { tam: 10.5, f: negrito, x: M + 10, largura: col })
-    texto([s.papel, s.email, mascararCpf(s.cpf) && `CPF ${mascararCpf(s.cpf)}`].filter(Boolean).join(' · '), { tam: 8, cor: COR_MUTADA, x: M + 10, largura: col })
+    texto([s.papel, s.email, documentoNaFolha(s.cpf)].filter(Boolean).join(' · '), { tam: 8, cor: COR_MUTADA, x: M + 10, largura: col })
     texto(`Assinou em ${formatarDataHora(s.assinadoEm)} (Brasília)`, { tam: 8.5, x: M + 10, largura: col })
     texto(`Identificação: link pessoal enviado ao e-mail + código de uso único validado às ${formatarHora(s.otpValidadoEm)}`, { tam: 7.5, cor: COR_MUTADA, x: M + 10, largura: col })
     texto(`IP ${s.ip ?? '—'} · ${dispositivo(s.userAgent)} · ${s.tipoAssinatura === 'desenhada' ? 'assinatura desenhada' : 'nome digitado'}`, { tam: 7.5, cor: COR_MUTADA, x: M + 10, largura: col })
@@ -728,7 +746,7 @@ export async function finalizarDocumento(documentoId: number) {
   const db = useDb()
   try {
     const { bytes, sigs, doc, selado } = await montarPdfFinal(documentoId)
-    const caminho = `${doc.pasta}/${codigoAssinatura(doc.id)}_assinado.pdf`
+    const caminho = `${doc.pasta}/${codigoAssinatura(doc)}_assinado.pdf`
     const abs = caminhoDocumento(caminho)
     await mkdir(dirname(abs), { recursive: true })
     await writeFile(abs, bytes)
@@ -743,7 +761,7 @@ export async function finalizarDocumento(documentoId: number) {
       'assinatura.concluida',
       {
         documentoId: doc.id,
-        codigo: codigoAssinatura(doc.id),
+        codigo: codigoAssinatura(doc),
         codigoVerificacao: doc.codigoVerificacao,
         titulo: doc.titulo,
         cliente: { nome: doc.clienteNome, documento: doc.clienteDocumento },
@@ -778,14 +796,14 @@ export async function finalizarDocumento(documentoId: number) {
  * Pasta e lembretes
  * ---------------------------------------------------------------------- */
 
-export function pastaDaAssinatura(d: { id: number; titulo: string; createdAt: Date; clienteNome: string | null; clienteDocumento: string | null }, primeiro: { nome: string; email: string; cpf: string | null }) {
+export function pastaDaAssinatura(d: { id: number; codigo: string | null; titulo: string; createdAt: Date; clienteNome: string | null; clienteDocumento: string | null }, primeiro: { nome: string; email: string; cpf: string | null }) {
   const ano = dataSP(d.createdAt).slice(0, 4)
   const cliente = pastaDoCliente({
     documento: d.clienteDocumento ?? primeiro.cpf,
     nome: d.clienteNome ?? primeiro.nome,
     email: primeiro.email
   })
-  return `${cliente}/${ano}/${codigoAssinatura(d.id)}_${slugPasta(d.titulo, 40)}`
+  return `${cliente}/${ano}/${codigoAssinatura(d)}_${slugPasta(d.titulo, 40)}`
 }
 
 /** Lembrete a quem esta com a vez: a cada 3 dias, ate 3, em dia util das 8h as 18h (SP). */
@@ -816,7 +834,7 @@ export function mascararEmail(email: string) {
 export function resumoAssinatura(d: AssinDocumento, sigs: AssinSignatario[]): ResumoAssinatura {
   return {
     id: d.id,
-    codigo: codigoAssinatura(d.id),
+    codigo: codigoAssinatura(d),
     titulo: d.titulo,
     status: d.status as StatusAssinatura,
     ordem: d.ordem as 'paralela' | 'sequencial',
@@ -911,7 +929,7 @@ export async function landingAssinatura(doc: AssinDocumento, eu: AssinSignatario
   return {
     titulo: doc.titulo,
     mensagem: doc.mensagem,
-    codigo: codigoAssinatura(doc.id),
+    codigo: codigoAssinatura(doc),
     status: doc.status as StatusAssinatura,
     prazo: doc.prazo,
     remetente: doc.criadoPorNome,

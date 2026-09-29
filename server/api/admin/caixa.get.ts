@@ -43,8 +43,10 @@ export default defineEventHandler(async event => {
         loteNome: batches.nome,
         solicId: inbound.solicId,
         solicTitulo: solicitacoes.titulo,
+        solicCodigo: solicitacoes.codigo,
         assinDocumentoId: inbound.assinDocumentoId,
         assinTitulo: assinDocumentos.titulo,
+        assinCodigo: assinDocumentos.codigo,
         // chamado aberto no painel a partir desta mensagem
         ticketCode: sql<string | null>`(select t.ticket_code from sys_mail_tickets t where t.inbound_id = sys_mail_inbound.id order by t.id desc limit 1)`,
         ticketStatus: sql<string | null>`(select t.status_envio from sys_mail_tickets t where t.inbound_id = sys_mail_inbound.id order by t.id desc limit 1)`

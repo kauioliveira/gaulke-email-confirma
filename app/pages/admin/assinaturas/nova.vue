@@ -29,6 +29,40 @@ const mensagem = ref('')
 const clienteNome = ref('')
 const clienteDocumento = ref('')
 
+/* cliente: texto livre, com sugestões das empresas e clientes cadastrados */
+type EmpresaEncontrada = { nome: string; fantasia: string | null; documento: string | null; tipo: 'empresa' | 'pessoa'; ativo: boolean }
+const sugestoes = ref<EmpresaEncontrada[]>([])
+const mostrarSugestoes = ref(false)
+const buscandoCliente = ref(false)
+let atrasoCliente: ReturnType<typeof setTimeout> | undefined
+let escolhendo = false
+watch(clienteNome, v => {
+  if (escolhendo) { escolhendo = false; return }
+  clearTimeout(atrasoCliente)
+  if (v.trim().length < 2) { sugestoes.value = []; return }
+  atrasoCliente = setTimeout(async () => {
+    buscandoCliente.value = true
+    try {
+      sugestoes.value = await $fetch<EmpresaEncontrada[]>(api('/api/admin/empresas'), { query: { busca: v.trim() } })
+      mostrarSugestoes.value = true
+    } catch {
+      sugestoes.value = []
+    } finally {
+      buscandoCliente.value = false
+    }
+  }, 300)
+})
+function escolherCliente(e: EmpresaEncontrada) {
+  escolhendo = true
+  clienteNome.value = e.nome
+  clienteDocumento.value = formatarDocumento(e.documento)
+  mostrarSugestoes.value = false
+}
+function fecharSugestoes() {
+  // o clique numa sugestão acontece antes do blur terminar
+  setTimeout(() => (mostrarSugestoes.value = false), 150)
+}
+
 async function escolherPdf(e: Event) {
   const input = e.target as HTMLInputElement
   const f = input.files?.[0]
@@ -54,7 +88,11 @@ type Signatario = { nome: string; email: string; cpf: string; papel: string }
 const signatarios = ref<Signatario[]>([{ nome: '', email: '', cpf: '', papel: '' }])
 const ordem = ref<'paralela' | 'sequencial'>('paralela')
 const RE_EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
-const valido = (s: Signatario) => s.nome.trim().length >= 3 && RE_EMAIL.test(s.email.trim()) && [0, 11].includes(s.cpf.replace(/\D/g, '').length)
+const valido = (s: Signatario) => s.nome.trim().length >= 3 && RE_EMAIL.test(s.email.trim()) && documentoValido(s.cpf)
+// USelect não aceita valor vazio: "sem papel" tem um valor próprio
+const SEM_PAPEL = '__sem__'
+const OPCOES_PAPEL = [{ label: 'Sem papel', value: SEM_PAPEL }, ...PAPEIS_ASSINATURA.map(p => ({ label: p, value: p }))]
+const testemunhas = computed(() => signatarios.value.filter(s => s.papel === 'Testemunha').length)
 const signatariosOk = computed(() => {
   const emails = signatarios.value.map(s => s.email.trim().toLowerCase())
   return signatarios.value.length > 0 && signatarios.value.every(valido) && new Set(emails).size === emails.length
@@ -256,11 +294,44 @@ async function enviar() {
           <UTextarea v-model="mensagem" :rows="3" autoresize class="w-full" placeholder="Vazio usa um texto padrão." />
         </UFormField>
         <div class="grid gap-4 sm:grid-cols-2">
-          <UFormField label="Cliente / empresa (opcional)" help="Organiza a pasta.">
-            <UInput v-model="clienteNome" class="w-full" />
+          <UFormField label="Cliente / empresa (opcional)" help="Digite para buscar nos clientes da Gaulke, ou escreva livremente. Organiza a pasta.">
+            <div class="relative">
+              <UInput
+                v-model="clienteNome"
+                icon="i-lucide-building-2"
+                :loading="buscandoCliente"
+                placeholder="Razão social, fantasia ou CNPJ"
+                autocomplete="off"
+                class="w-full"
+                @focus="mostrarSugestoes = sugestoes.length > 0"
+                @blur="fecharSugestoes"
+              />
+              <ul
+                v-if="mostrarSugestoes && sugestoes.length"
+                class="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border border-default bg-default py-1 shadow-lg"
+              >
+                <li v-for="(e, i) in sugestoes" :key="i">
+                  <button type="button" class="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-elevated" @mousedown.prevent="escolherCliente(e)">
+                    <UIcon :name="e.tipo === 'empresa' ? 'i-lucide-building-2' : 'i-lucide-user-round'" class="mt-0.5 size-4 shrink-0 text-muted" />
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate text-sm" :class="!e.ativo && 'text-muted line-through'">{{ e.nome }}</span>
+                      <span class="block truncate text-xs text-muted">
+                        {{ [e.fantasia, e.documento && formatarDocumento(e.documento), !e.ativo && 'inativo'].filter(Boolean).join(' · ') || (e.tipo === 'empresa' ? 'empresa' : 'pessoa física') }}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </div>
           </UFormField>
-          <UFormField label="CPF/CNPJ do cliente">
-            <UInput v-model="clienteDocumento" placeholder="Só números" class="w-full" />
+          <UFormField label="CPF/CNPJ do cliente" :error="clienteDocumento && !documentoValido(clienteDocumento) ? 'CPF tem 11 dígitos; CNPJ, 14' : undefined">
+            <UInput
+              :model-value="clienteDocumento"
+              placeholder="00.000.000/0000-00"
+              inputmode="numeric"
+              class="w-full"
+              @update:model-value="v => (clienteDocumento = mascaraDocumento(String(v ?? '')))"
+            />
           </UFormField>
         </div>
       </div>
@@ -277,12 +348,23 @@ async function enviar() {
         <UButton v-if="sessao?.usuario?.email" label="Incluir eu mesmo" icon="i-lucide-user-plus" color="neutral" variant="ghost" size="sm" class="ml-auto" @click="incluirEu" />
       </div>
       <div class="space-y-2">
-        <div v-for="(s, i) in signatarios" :key="i" class="grid items-start gap-2 rounded-lg border border-default bg-default p-3 sm:grid-cols-[auto_1fr_1fr_10rem_10rem_auto]">
+        <div v-for="(s, i) in signatarios" :key="i" class="grid items-start gap-2 rounded-lg border border-default bg-default p-3 sm:grid-cols-[auto_1fr_1fr_11rem_12rem_auto]">
           <span class="mt-2 flex size-6 items-center justify-center rounded-full text-xs font-semibold text-white" :style="{ background: cor(i) }">{{ i + 1 }}</span>
           <UInput v-model="s.nome" placeholder="Nome completo" :color="s.nome && s.nome.trim().length < 3 ? 'error' : undefined" />
           <UInput v-model="s.email" type="email" placeholder="email@exemplo.com.br" :color="s.email && !RE_EMAIL.test(s.email.trim()) ? 'error' : undefined" />
-          <UInput v-model="s.cpf" placeholder="CPF (opcional)" :color="![0, 11].includes(s.cpf.replace(/\D/g, '').length) ? 'error' : undefined" />
-          <UInput v-model="s.papel" placeholder="Papel (opcional)" />
+          <UInput
+            :model-value="s.cpf"
+            placeholder="CPF ou CNPJ (opcional)"
+            inputmode="numeric"
+            :color="!documentoValido(s.cpf) ? 'error' : undefined"
+            @update:model-value="v => (s.cpf = mascaraDocumento(String(v ?? '')))"
+          />
+          <USelect
+            :model-value="s.papel || SEM_PAPEL"
+            :items="OPCOES_PAPEL"
+            :class="!s.papel && 'text-muted'"
+            @update:model-value="v => (s.papel = v === SEM_PAPEL ? '' : String(v))"
+          />
           <div class="flex items-center">
             <template v-if="ordem === 'sequencial'">
               <UButton icon="i-lucide-chevron-up" color="neutral" variant="ghost" size="sm" :disabled="i === 0" aria-label="Subir" @click="mover(i, -1)" />
@@ -293,7 +375,17 @@ async function enviar() {
         </div>
       </div>
       <UButton label="Adicionar pessoa" icon="i-lucide-plus" color="neutral" variant="outline" @click="signatarios.push({ nome: '', email: '', cpf: '', papel: '' })" />
-      <p class="text-xs text-muted">Papel é como a pessoa aparece na folha de assinaturas (Contratante, Contratada, Testemunha…). O CPF aparece mascarado.</p>
+      <p class="text-xs text-muted">
+        Quem assina pode ser pessoa física (CPF) ou empresa (CNPJ). O papel é como a pessoa aparece na folha de assinaturas;
+        na folha o CPF sai mascarado e o CNPJ sai inteiro.
+      </p>
+      <UAlert
+        v-if="testemunhas === 1"
+        color="info"
+        variant="subtle"
+        icon="i-lucide-info"
+        description="Há uma testemunha. Para o contrato valer como título executivo, a lei pede duas (CPC, art. 784, III). Se não for o caso, pode seguir."
+      />
     </section>
 
     <!-- 3. campos -->

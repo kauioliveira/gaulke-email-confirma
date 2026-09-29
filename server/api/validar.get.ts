@@ -23,7 +23,7 @@ export default defineEventHandler(async event => {
   if (!d || d.status === 'rascunho') throw createError({ statusCode: 404, statusMessage: 'Nenhum documento encontrado' })
   const sigs = await db.select().from(assinSignatarios).where(eq(assinSignatarios.documentoId, d.id))
   const resposta: ValidacaoAssinatura = {
-    codigo: codigoAssinatura(d.id),
+    codigo: codigoAssinatura(d),
     titulo: d.titulo,
     status: d.status as StatusAssinatura,
     enviadoEm: d.enviadoEm?.toISOString() ?? null,

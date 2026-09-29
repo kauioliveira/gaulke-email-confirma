@@ -13,14 +13,14 @@ export default defineEventHandler(async event => {
   if (status !== 'todos') cond.push(eq(assinDocumentos.status, status))
   if (q.minhas === '1' && op.id) cond.push(eq(assinDocumentos.criadoPorUserId, op.id))
   if (busca) {
-    const cod = /^ass-?0*(\d+)$/i.exec(busca)
     cond.push(
       or(
         ilike(assinDocumentos.titulo, `%${busca}%`),
+        ilike(assinDocumentos.codigo, `%${busca}%`),
+        ilike(assinDocumentos.clienteDocumento, `%${busca.replace(/\D/g, '') || busca}%`),
         ilike(assinDocumentos.clienteNome, `%${busca}%`),
         sql`exists (select 1 from sys_mail_assin_signatarios s where s.documento_id = ${assinDocumentos.id}
                      and (s.nome ilike ${`%${busca}%`} or s.email ilike ${`%${busca}%`}))`,
-        ...(cod ? [eq(assinDocumentos.id, Number(cod[1]))] : [])
       )!
     )
   }

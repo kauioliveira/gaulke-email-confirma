@@ -32,7 +32,7 @@ export default defineEventHandler(async event => {
       usuario: {
         id: null,
         nome: OPERADOR_SENHA_LOCAL.nome,
-        email: null,
+        email: OPERADOR_SENHA_LOCAL.email,
         papel: OPERADOR_SENHA_LOCAL.papel,
       },
     }

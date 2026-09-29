@@ -13,7 +13,7 @@ export default defineEventHandler(async event => {
   setResponseHeaders(event, {
     'content-type': 'application/pdf',
     'content-length': info.size,
-    'content-disposition': disposicao(`${codigoAssinatura(doc.id)}_${slugPasta(doc.titulo, 50)}_assinado.pdf`),
+    'content-disposition': disposicao(`${codigoAssinatura(doc)}_${slugPasta(doc.titulo, 50)}_assinado.pdf`),
     'cache-control': 'no-store, private'
   })
   return sendStream(event, createReadStream(abs))

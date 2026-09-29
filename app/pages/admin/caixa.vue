@@ -122,13 +122,13 @@ async function removerSupressao(e: EnderecoSuprimido) {
                 <p v-else-if="m.solicId" class="mt-1 text-xs">
                   <span class="text-muted">Solicitação </span>
                   <NuxtLink :to="`/admin/solicitacoes/${m.solicId}`" class="text-primary hover:underline">
-                    SOL-{{ String(m.solicId).padStart(6, '0') }} · {{ m.solicTitulo }}
+                    {{ m.solicCodigo ?? `SOL-${String(m.solicId).padStart(6, '0')}` }} · {{ m.solicTitulo }}
                   </NuxtLink>
                 </p>
                 <p v-else-if="m.assinDocumentoId" class="mt-1 text-xs">
                   <span class="text-muted">Assinatura </span>
                   <NuxtLink :to="`/admin/assinaturas/${m.assinDocumentoId}`" class="text-primary hover:underline">
-                    ASS-{{ String(m.assinDocumentoId).padStart(6, '0') }} · {{ m.assinTitulo }}
+                    {{ m.assinCodigo ?? `ASS-${String(m.assinDocumentoId).padStart(6, '0')}` }} · {{ m.assinTitulo }}
                   </NuxtLink>
                 </p>
                 <p v-else class="mt-1 text-xs text-muted italic">Sem vínculo com envio</p>

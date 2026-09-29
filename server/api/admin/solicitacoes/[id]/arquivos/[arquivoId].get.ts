@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { and, eq } from 'drizzle-orm'
-import { useDb, solicArquivos } from '../../../../../db'
+import { useDb, solicArquivos, solicitacoes } from '../../../../../db'
 import { auditar } from '../../../../../utils/auditoria'
 import { caminhoDocumento, codigoSolicitacao, disposicao } from '../../../../../utils/documentos'
 import { mimeDoArquivo, TIPOS_SOLICITACAO } from '../../../../../../shared/types/tipos-arquivo'
@@ -22,6 +22,7 @@ export default defineEventHandler(async event => {
   if (a.antivirus !== 'limpo' && a.antivirus !== 'sem_antivirus') {
     throw createError({ statusCode: 423, statusMessage: 'O arquivo ainda está na quarentena do antivírus' })
   }
+  const [sol] = await useDb().select({ id: solicitacoes.id, codigo: solicitacoes.codigo }).from(solicitacoes).where(eq(solicitacoes.id, solicId))
   const abs = caminhoDocumento(a.caminho)
   const info = await stat(abs).catch(() => null)
   if (!info?.isFile()) throw createError({ statusCode: 404, statusMessage: 'Arquivo indisponível no servidor' })
@@ -32,7 +33,7 @@ export default defineEventHandler(async event => {
   await auditar(event, 'solicitacao.baixar_arquivo', {
     entidade: 'solicitacao',
     id: solicId,
-    resumo: `${inline ? 'Abriu' : 'Baixou'} "${a.nomeOriginal}" da ${codigoSolicitacao(solicId)}`,
+    resumo: `${inline ? 'Abriu' : 'Baixou'} "${a.nomeOriginal}" da ${codigoSolicitacao(sol ?? { id: solicId })}`,
     dados: { arquivoId: a.id, sha256: a.sha256 }
   })
   setResponseHeaders(event, {

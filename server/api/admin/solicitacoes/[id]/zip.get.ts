@@ -46,7 +46,7 @@ export default defineEventHandler(async event => {
     throw createError({ statusCode: 404, statusMessage: 'Ainda não há arquivo liberado para baixar' })
   }
 
-  const codigo = codigoSolicitacao(s.id)
+  const codigo = codigoSolicitacao(s)
   const saida = new PassThrough()
   const zip = new Zip((err, pedaco, fim) => {
     if (err) return saida.destroy(err)

@@ -30,7 +30,7 @@ export default defineEventHandler(async event => {
   await auditar(event, 'assinatura.reenviar', {
     entidade: 'assinatura',
     id: d.id,
-    resumo: `Reenviou o convite de ${codigoAssinatura(d.id)} para ${s.nome} <${novo ?? s.email}>${novo ? ` (antes ${s.email})` : ''}${r.ok ? '' : ' — FALHOU'}`
+    resumo: `Reenviou o convite de ${codigoAssinatura(d)} para ${s.nome} <${novo ?? s.email}>${novo ? ` (antes ${s.email})` : ''}${r.ok ? '' : ' — FALHOU'}`
   })
   if (!r.ok) throw createError({ statusCode: 502, statusMessage: `O e-mail não saiu: ${r.erro}` })
   return { ok: true }

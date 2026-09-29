@@ -69,25 +69,54 @@ async function copiar(texto: string) {
   }
 }
 
-const ICONE_EVENTO: Record<string, string> = {
-  resposta_email: 'i-lucide-reply',
-  devolucao: 'i-lucide-mail-x',
-  auto_resposta: 'i-lucide-bot',
-  recibo: 'i-lucide-mail-check',
-  criado: 'i-lucide-sparkles',
-  email_convite: 'i-lucide-send',
-  email_lembrete: 'i-lucide-bell',
-  email_erro: 'i-lucide-mail-x',
-  email_corrigido: 'i-lucide-at-sign',
-  visualizado: 'i-lucide-eye',
-  codigo_enviado: 'i-lucide-key-round',
-  codigo_invalido: 'i-lucide-shield-alert',
-  assinado: 'i-lucide-signature',
-  recusado: 'i-lucide-circle-x',
-  concluido: 'i-lucide-badge-check',
-  cancelado: 'i-lucide-ban',
-  finalizacao_erro: 'i-lucide-triangle-alert'
+/** Cada tipo de evento: título curto, ícone e cor na linha do tempo. */
+type Cor = 'success' | 'primary' | 'warning' | 'error' | 'neutral' | 'info'
+const TIPO_EVENTO: Record<string, { titulo: string; icone: string; cor: Cor }> = {
+  criado: { titulo: 'Documento enviado para assinatura', icone: 'i-lucide-sparkles', cor: 'primary' },
+  email_convite: { titulo: 'Convite enviado', icone: 'i-lucide-send', cor: 'info' },
+  email_lembrete: { titulo: 'Lembrete enviado', icone: 'i-lucide-bell', cor: 'info' },
+  email_erro: { titulo: 'Falha no envio do e-mail', icone: 'i-lucide-mail-x', cor: 'error' },
+  email_corrigido: { titulo: 'E-mail corrigido', icone: 'i-lucide-at-sign', cor: 'warning' },
+  visualizado: { titulo: 'Abriu o documento', icone: 'i-lucide-eye', cor: 'neutral' },
+  codigo_enviado: { titulo: 'Código de confirmação enviado', icone: 'i-lucide-key-round', cor: 'neutral' },
+  codigo_invalido: { titulo: 'Código inválido', icone: 'i-lucide-shield-alert', cor: 'warning' },
+  assinado: { titulo: 'Assinou', icone: 'i-lucide-signature', cor: 'success' },
+  recusado: { titulo: 'Recusou', icone: 'i-lucide-circle-x', cor: 'error' },
+  concluido: { titulo: 'Assinado por todos', icone: 'i-lucide-badge-check', cor: 'success' },
+  cancelado: { titulo: 'Cancelado', icone: 'i-lucide-ban', cor: 'neutral' },
+  finalizacao_erro: { titulo: 'Falha ao gerar o PDF final', icone: 'i-lucide-triangle-alert', cor: 'error' },
+  resposta_email: { titulo: 'Respondeu por e-mail', icone: 'i-lucide-reply', cor: 'primary' },
+  devolucao: { titulo: 'E-mail devolvido', icone: 'i-lucide-mail-x', cor: 'error' },
+  auto_resposta: { titulo: 'Resposta automática', icone: 'i-lucide-bot', cor: 'neutral' },
+  recibo: { titulo: 'Recibo de leitura', icone: 'i-lucide-mail-check', cor: 'neutral' }
 }
+const tipoEvento = (t: string) => TIPO_EVENTO[t] ?? { titulo: t.replace(/_/g, ' '), icone: 'i-lucide-dot', cor: 'neutral' as Cor }
+/** classes fixas por cor: o Tailwind precisa ver o nome inteiro no código */
+const BOLINHA: Record<Cor, string> = {
+  success: 'bg-success/10 text-success ring-success/30',
+  primary: 'bg-primary/10 text-primary ring-primary/30',
+  warning: 'bg-warning/10 text-warning ring-warning/30',
+  error: 'bg-error/10 text-error ring-error/30',
+  info: 'bg-info/10 text-info ring-info/30',
+  neutral: 'bg-elevated text-muted ring-default'
+}
+
+/** Mais recente primeiro, agrupado por dia (São Paulo). */
+const historico = computed(() => {
+  const grupos: { dia: string; eventos: DetalheAssinatura['eventos'] }[] = []
+  for (const e of [...(d.value?.eventos ?? [])].reverse()) {
+    const dia = formatarData(e.criadoEm)
+    const g = grupos[grupos.length - 1]
+    if (g?.dia === dia) g.eventos.push(e)
+    else grupos.push({ dia, eventos: [e] })
+  }
+  const hoje = formatarData(new Date())
+  const ontem = formatarData(new Date(Date.now() - 86_400_000))
+  return grupos.map(g => ({ ...g, rotulo: g.dia === hoje ? 'Hoje' : g.dia === ontem ? 'Ontem' : g.dia }))
+})
+const aberto = ref<number | null>(null)
+/** SHA-256 inteiro no meio da frase só atrapalha a leitura: o texto mostra o começo e o fim */
+const semHashLongo = (t: string) => t.replace(/\b([0-9a-f]{8})[0-9a-f]{50}([0-9a-f]{6})\b/g, '$1…$2')
 </script>
 
 <template>
@@ -195,7 +224,7 @@ const ICONE_EVENTO: Record<string, string> = {
             </template>
             <template v-if="d.clienteNome || d.clienteDocumento">
               <dt class="text-muted">Referente a</dt>
-              <dd>{{ [d.clienteNome, d.clienteDocumento].filter(Boolean).join(' · ') }}</dd>
+              <dd>{{ [d.clienteNome, d.clienteDocumento && formatarDocumento(d.clienteDocumento)].filter(Boolean).join(' · ') }}</dd>
             </template>
             <dt class="text-muted">Prazo</dt>
             <dd>{{ formatarPrazo(d.prazo) }}</dd>
@@ -217,18 +246,44 @@ const ICONE_EVENTO: Record<string, string> = {
             </UTooltip>
           </div>
         </template>
-        <ol class="space-y-3">
-          <li v-for="e in [...d.eventos].reverse()" :key="e.id" class="flex gap-3 text-sm">
-            <UIcon :name="ICONE_EVENTO[e.tipo] || 'i-lucide-dot'" class="mt-0.5 size-4 shrink-0 text-muted" />
-            <div class="min-w-0">
-              <p class="break-words">{{ e.descricao }}</p>
-              <p class="text-xs text-muted">
-                {{ formatarDataHora(e.criadoEm) }}<template v-if="e.porNome"> · {{ e.porNome }}</template><template v-if="e.ip"> · IP {{ e.ip }}</template>
-              </p>
-              <p class="truncate font-mono text-[10px] text-muted/70" :title="e.hash">{{ e.hash }}</p>
-            </div>
-          </li>
-        </ol>
+        <div class="space-y-5">
+          <section v-for="g in historico" :key="g.dia">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{{ g.rotulo }}</p>
+            <ol class="relative">
+              <li v-for="(e, i) in g.eventos" :key="e.id" class="relative flex gap-3 pb-4 last:pb-0">
+                <!-- fio que liga um evento ao próximo -->
+                <span v-if="i < g.eventos.length - 1" class="absolute left-[15px] top-8 bottom-0 border-l border-default" aria-hidden="true" />
+                <span class="relative z-10 flex size-8 shrink-0 items-center justify-center rounded-full ring-1" :class="BOLINHA[tipoEvento(e.tipo).cor]">
+                  <UIcon :name="tipoEvento(e.tipo).icone" class="size-4" />
+                </span>
+                <div class="min-w-0 flex-1 pt-1">
+                  <div class="flex items-baseline justify-between gap-2">
+                    <p class="text-sm font-medium">{{ tipoEvento(e.tipo).titulo }}</p>
+                    <time class="shrink-0 text-xs tabular-nums text-muted">{{ formatarHora(e.criadoEm).slice(0, 5) }}</time>
+                  </div>
+                  <p class="mt-0.5 break-words text-sm text-muted">{{ semHashLongo(e.descricao) }}</p>
+                  <button
+                    class="mt-1 inline-flex items-center gap-1 text-[11px] text-muted hover:text-default"
+                    @click="aberto = aberto === e.id ? null : e.id"
+                  >
+                    <UIcon :name="aberto === e.id ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="size-3" />
+                    {{ aberto === e.id ? 'ocultar detalhes' : 'detalhes' }}
+                  </button>
+                  <dl v-if="aberto === e.id" class="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-elevated/60 p-2 text-[11px]">
+                    <dt class="text-muted">Quando</dt><dd class="tabular-nums">{{ formatarDataHora(e.criadoEm) }} (Brasília)</dd>
+                    <template v-if="e.porNome"><dt class="text-muted">Por</dt><dd>{{ e.porNome }}</dd></template>
+                    <template v-if="e.ip"><dt class="text-muted">IP</dt><dd class="font-mono">{{ e.ip }}</dd></template>
+                    <dt class="text-muted">Hash</dt>
+                    <dd class="flex min-w-0 items-center gap-1">
+                      <span class="truncate font-mono" :title="e.hash">{{ e.hash }}</span>
+                      <UButton icon="i-lucide-copy" size="xs" color="neutral" variant="ghost" aria-label="Copiar hash" @click="copiar(e.hash)" />
+                    </dd>
+                  </dl>
+                </div>
+              </li>
+            </ol>
+          </section>
+        </div>
       </UCard>
     </div>
 

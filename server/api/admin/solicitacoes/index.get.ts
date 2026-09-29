@@ -7,7 +7,7 @@ import { CONTAGENS_SOLIC, resumoDaLinha } from '../../../utils/solicitacoes'
  * Lista das solicitacoes. Filtros:
  *   status   aberta | em_analise | concluida | cancelada | atrasada | analisar
  *   minhas=1 so as que eu pedi
- *   busca    cliente, e-mail, empresa, CPF/CNPJ, titulo ou SOL-000123
+ *   busca    cliente, e-mail, empresa, CPF/CNPJ, titulo ou SOL-26-X7K2P9
  */
 export default defineEventHandler(async event => {
   const op = operadorAtual(event)
@@ -34,7 +34,6 @@ export default defineEventHandler(async event => {
   }
   if (q.minhas === '1' && op.id) cond.push(eq(solicitacoes.criadoPorUserId, op.id))
   if (busca) {
-    const codigo = /^sol-?0*(\d+)$/i.exec(busca)
     const digitos = busca.replace(/\D/g, '')
     cond.push(
       or(
@@ -43,7 +42,7 @@ export default defineEventHandler(async event => {
         ilike(solicitacoes.empresa, `%${busca}%`),
         ilike(solicitacoes.titulo, `%${busca}%`),
         ...(digitos.length >= 4 ? [ilike(solicitacoes.documento, `%${digitos}%`)] : []),
-        ...(codigo ? [eq(solicitacoes.id, Number(codigo[1]))] : [])
+        ilike(solicitacoes.codigo, `%${busca}%`)
       )!
     )
   }

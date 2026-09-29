@@ -223,9 +223,9 @@ const ROTULO_CAMPO: Record<TipoCampoAssinatura, string> = { assinatura: 'Sua ass
                 <div
                   v-for="(c, i) in data.campos.filter(c => c.pagina === numero)"
                   :key="i"
-                  class="absolute flex items-center justify-center rounded-sm border-2 border-dashed text-[10px] font-semibold"
+                  class="absolute flex items-center justify-center overflow-hidden whitespace-nowrap rounded-sm border-2 border-dashed font-semibold leading-none""
                   :class="data.eu.status === 'assinado' ? 'border-success/60 bg-success/10 text-success' : 'animate-pulse border-primary bg-primary/10 text-primary'"
-                  :style="{ left: `${c.x * escala}px`, top: `${(altura - c.y - c.altura) * escala}px`, width: `${c.largura * escala}px`, height: `${c.altura * escala}px` }"
+                  :style="{ left: `${c.x * escala}px`, top: `${(altura - c.y - c.altura) * escala}px`, width: `${c.largura * escala}px`, height: `${c.altura * escala}px`, fontSize: `${Math.max(6, Math.min(11, c.altura * escala * 0.45, (c.largura * escala) / 8))}px` }"
                 >
                   {{ data.eu.status === 'assinado' ? 'Assinado' : ROTULO_CAMPO[c.tipo] }}
                 </div>

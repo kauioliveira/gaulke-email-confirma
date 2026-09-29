@@ -5,7 +5,8 @@ import { operadorAtual } from '../../../utils/permissoes'
 import { auditar } from '../../../utils/auditoria'
 import { suprimidos } from '../../../utils/supressao'
 import { criarSolicSchema, enviarEmailSolic, registrarEventoSolic } from '../../../utils/solicitacoes'
-import { codigoSolicitacao, pastaDaSolicitacao } from '../../../utils/documentos'
+import { pastaDaSolicitacao } from '../../../utils/documentos'
+import { novoCodigoSolicitacao } from '../../../utils/solicitacoes'
 
 /**
  * Cria a solicitacao — UMA POR CLIENTE, cada uma com a sua copia dos itens
@@ -38,13 +39,23 @@ export default defineEventHandler(async event => {
 
   const grupo = destinatarios.length > 1 ? randomUUID() : null
   const ids: number[] = []
+  // um codigo publico sorteado por cliente (SOL-26-X7K2P9), sem repetir entre eles
+  const codigos: string[] = []
+  for (const _ of destinatarios) {
+    let c: string
+    do c = await novoCodigoSolicitacao()
+    while (codigos.includes(c))
+    codigos.push(c)
+  }
+  const codigoDe = new Map<number, string>()
 
   await db.transaction(async tx => {
-    for (const x of destinatarios) {
+    for (const [n, x] of destinatarios.entries()) {
       const [s] = await tx
         .insert(solicitacoes)
         .values({
           titulo: d.titulo,
+          codigo: codigos[n]!,
           mensagem: d.mensagem,
           checklistId: d.checklistId ?? null,
           destinatarioNome: x.nome,
@@ -68,6 +79,7 @@ export default defineEventHandler(async event => {
       await tx.update(solicitacoes).set({ pasta }).where(eq(solicitacoes.id, s!.id))
       await tx.insert(solicItens).values(d.itens.map((i, n) => ({ ...i, solicId: s!.id, ordem: n + 1 })))
       ids.push(s!.id)
+      codigoDe.set(s!.id, codigos[n]!)
     }
   })
 
@@ -80,7 +92,7 @@ export default defineEventHandler(async event => {
     id: ids.length === 1 ? ids[0] : grupo,
     resumo:
       ids.length === 1
-        ? `Pediu documentos a ${destinatarios[0]!.email}: "${d.titulo}" (${codigoSolicitacao(ids[0]!)}, ${d.itens.length} itens)`
+        ? `Pediu documentos a ${destinatarios[0]!.email}: "${d.titulo}" (${codigoDe.get(ids[0]!)}, ${d.itens.length} itens)`
         : `Pediu documentos a ${ids.length} clientes: "${d.titulo}" (${d.itens.length} itens)`,
     dados: {
       ids,

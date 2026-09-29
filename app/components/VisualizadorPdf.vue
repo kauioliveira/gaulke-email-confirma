@@ -57,20 +57,41 @@ async function carregar() {
   }
 }
 
+/**
+ * Uma pintura por vez. Abrir o PDF e o ajuste de largura disparam desenhar()
+ * quase juntos; duas render() do pdf.js no MESMO canvas se atropelam (a
+ * segunda redimensiona o canvas no meio da primeira) e a página sai preta e
+ * espelhada. Por isso a pintura em curso é CANCELADA e esperada antes de a
+ * próxima começar.
+ */
 let desenhando = 0
-async function desenhar() {
-  if (!doc) return
+let tarefa: { cancel: () => void; promise: Promise<unknown> } | null = null
+let fila: Promise<void> = Promise.resolve()
+function desenhar() {
   const vez = ++desenhando
+  tarefa?.cancel()
+  fila = fila.then(() => pintar(vez)).catch(() => {})
+  return fila
+}
+async function pintar(vez: number) {
+  if (!doc) return
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   for (const p of paginas.value) {
-    if (vez !== desenhando) return // a largura mudou no meio: recomeça
+    if (vez !== desenhando) return // outra pintura foi pedida: ela recomeça do zero
     const canvas = canvases.get(p.numero)
     if (!canvas) continue
     const pg = await doc.getPage(p.numero)
     const vp = pg.getViewport({ scale: escala.value * dpr })
     canvas.width = Math.floor(vp.width)
     canvas.height = Math.floor(vp.height)
-    await pg.render({ canvas, viewport: vp }).promise
+    tarefa = pg.render({ canvas, viewport: vp })
+    try {
+      await tarefa!.promise
+    } catch {
+      return // cancelada: a pintura nova assume
+    } finally {
+      tarefa = null
+    }
   }
 }
 

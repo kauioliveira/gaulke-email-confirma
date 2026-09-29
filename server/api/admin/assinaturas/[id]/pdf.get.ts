@@ -14,11 +14,11 @@ export default defineEventHandler(async event => {
   const abs = caminhoDocumento(caminho)
   const info = await stat(abs).catch(() => null)
   if (!info?.isFile()) throw createError({ statusCode: 404, statusMessage: 'Arquivo indisponível no servidor' })
-  await auditar(event, 'assinatura.baixar', { entidade: 'assinatura', id: d.id, resumo: `Baixou o PDF ${final ? 'assinado' : 'original'} de ${codigoAssinatura(d.id)}` })
+  await auditar(event, 'assinatura.baixar', { entidade: 'assinatura', id: d.id, resumo: `Baixou o PDF ${final ? 'assinado' : 'original'} de ${codigoAssinatura(d)}` })
   setResponseHeaders(event, {
     'content-type': 'application/pdf',
     'content-length': info.size,
-    'content-disposition': disposicao(`${codigoAssinatura(d.id)}_${slugPasta(d.titulo, 50)}${final ? '_assinado' : ''}.pdf`, q.inline === '1'),
+    'content-disposition': disposicao(`${codigoAssinatura(d)}_${slugPasta(d.titulo, 50)}${final ? '_assinado' : ''}.pdf`, q.inline === '1'),
     'cache-control': 'no-store, private'
   })
   return sendStream(event, createReadStream(abs))

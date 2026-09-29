@@ -11,7 +11,7 @@ import { semAspas } from './env'
  *
  *   quarentena/<aleatorio>.<ext>                      enquanto o antivirus nao liberou
  *   modelos/<nome>-<aleatorio>.<ext>                  arquivos modelo dos itens do checklist
- *   clientes/<CPF-ou-CNPJ>_<nome>/<ano>/SOL-000123_<titulo>/01-<item>/<arquivo>
+ *   clientes/<CPF-ou-CNPJ>_<nome>/<ano>/SOL-26-X7K2P9_<titulo>/01-<item>/<arquivo>
  *
  * Sem CPF/CNPJ a pasta do cliente sai do e-mail. O caminho gravado no banco e
  * sempre RELATIVO: mudar o volume de lugar nao invalida nada.
@@ -55,13 +55,15 @@ export function pastaDoCliente(c: { documento?: string | null; nome?: string | n
   return `clientes/${slugPasta(c.email, 60)}`
 }
 
-export function codigoSolicitacao(id: number) {
-  return `SOL-${String(id).padStart(6, '0')}`
+/** Codigo publico (SOL-26-X7K2P9); o formato antigo so para linha sem codigo. */
+export function codigoSolicitacao(s: { id: number; codigo?: string | null }) {
+  return s.codigo ?? `SOL-${String(s.id).padStart(6, '0')}`
 }
 
 /** Pasta de uma solicitacao, dentro da do cliente e do ano (em Sao Paulo) em que foi criada. */
 export function pastaDaSolicitacao(s: {
   id: number
+  codigo: string | null
   titulo: string
   createdAt: Date
   documento?: string | null
@@ -76,7 +78,7 @@ export function pastaDaSolicitacao(s: {
     empresa: s.empresa,
     email: s.destinatarioEmail
   })
-  return `${cliente}/${ano}/${codigoSolicitacao(s.id)}_${slugPasta(s.titulo, 40)}`
+  return `${cliente}/${ano}/${codigoSolicitacao(s)}_${slugPasta(s.titulo, 40)}`
 }
 
 export function pastaDoItem(pastaSolic: string, item: { ordem: number; titulo: string }) {
@@ -128,7 +130,7 @@ export async function apagarDocumento(rel: string) {
  */
 export async function apagarPastaDocumento(rel: string) {
   const partes = rel.split('/').filter(Boolean)
-  if (partes.length < 4 || partes[0] !== 'clientes' || !/^(SOL|ASS)-\d{6}/.test(partes[3]!)) {
+  if (partes.length < 4 || partes[0] !== 'clientes' || !/^(SOL|ASS)-(\d{6}|\d{2}-[A-Z0-9]{6})_/.test(partes[3]!)) {
     throw new Error(`pasta fora do padrao, nao apagada: ${rel}`)
   }
   await rm(caminhoDocumento(partes.join('/')), { recursive: true, force: true })

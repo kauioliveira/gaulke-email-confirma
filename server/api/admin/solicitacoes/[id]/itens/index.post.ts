@@ -33,7 +33,7 @@ export default defineEventHandler(async event => {
   await auditar(event, 'solicitacao.incluir_item', {
     entidade: 'solicitacao',
     id: s.id,
-    resumo: `Incluiu "${d.titulo}" na ${codigoSolicitacao(s.id)} (${s.destinatarioEmail})`,
+    resumo: `Incluiu "${d.titulo}" na ${codigoSolicitacao(s)} (${s.destinatarioEmail})`,
     dados: { item: d }
   })
   return { id: item!.id }

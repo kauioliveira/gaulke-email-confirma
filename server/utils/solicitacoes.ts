@@ -14,6 +14,7 @@ import {
 } from '../db'
 import { resolverConta, enviarEmail } from './mailer'
 import { emitirWebhook } from './webhooks'
+import { sortearCodigo } from './codigos'
 import { renderizarBlocos } from './blocos'
 import { baseUrl } from './urls'
 import { verificarArquivo } from './antivirus'
@@ -156,6 +157,13 @@ export function statusPelosItens(itens: ItemParaStatus[]): 'aberta' | 'em_analis
   if (obrig.every(resolvido) && !algoEsperando && (obrig.length > 0 || temResolvido)) return 'concluida'
   if (obrig.every(entregue) && algoEsperando) return 'em_analise'
   return 'aberta'
+}
+
+/** Codigo publico novo, sorteado e unico (SOL-26-X7K2P9). */
+export function novoCodigoSolicitacao() {
+  return sortearCodigo('SOL', async codigo =>
+    (await useDb().select({ id: solicitacoes.id }).from(solicitacoes).where(eq(solicitacoes.codigo, codigo)).limit(1)).length > 0
+  )
 }
 
 /**
@@ -307,7 +315,7 @@ export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, itens: SolicIt
   }
   blocos.push({ id: 'rodape', tipo: 'rodape', texto: RODAPE_SOLIC })
 
-  const codigo = codigoSolicitacao(s.id)
+  const codigo = codigoSolicitacao(s)
   const link = linkSolicitacao(s.token)
   const html = preencherEmail(renderizarBlocos(blocos, assunto), {
     nome: s.destinatarioNome || s.destinatarioEmail.split('@')[0] || '',
@@ -359,7 +367,7 @@ export async function enviarEmailSolic(
   try {
     const conta = await resolverConta(s.contaId)
     const dominio = (/@([^>\s]+)>?\s*$/.exec(conta.from)?.[1] || 'contabilgaulke.com.br').toLowerCase()
-    const messageId = `<${codigoSolicitacao(s.id)}.${tipo}.${randomBytes(4).toString('hex')}@${dominio}>`
+    const messageId = `<${codigoSolicitacao(s)}.${tipo}.${randomBytes(4).toString('hex')}@${dominio}>`
     await enviarEmail({
       conta,
       para: s.destinatarioEmail,
@@ -368,7 +376,7 @@ export async function enviarEmailSolic(
       texto,
       responderPara: s.responderPara,
       messageId,
-      headers: { 'X-Gaulke-Solicitacao': codigoSolicitacao(s.id) }
+      headers: { 'X-Gaulke-Solicitacao': codigoSolicitacao(s) }
     })
     await db
       .update(solicitacoes)
@@ -414,13 +422,13 @@ export async function avisarEquipe(s: Solicitacao, assunto: string, texto: strin
     { id: 'b', tipo: 'botao', texto: 'Abrir a solicitação' },
     { id: 'r', tipo: 'rodape', texto: 'Aviso automático do Gaulke Comunica.' }
   ]
-  const html = preencherEmail(renderizarBlocos(blocos, assunto), { nome: '', email: s.criadoPorEmail, empresa: '', link, codigo: codigoSolicitacao(s.id) })
+  const html = preencherEmail(renderizarBlocos(blocos, assunto), { nome: '', email: s.criadoPorEmail, empresa: '', link, codigo: codigoSolicitacao(s) })
   try {
     const conta = await resolverConta(s.contaId)
     await enviarEmail({
       conta,
       para: s.criadoPorEmail,
-      assunto: `[${codigoSolicitacao(s.id)}] ${assunto}`,
+      assunto: `[${codigoSolicitacao(s)}] ${assunto}`,
       html,
       texto: `${assunto}\n\n${texto}\n${lista.map(l => `- ${l}`).join('\n')}\n\n${link}`
     })
@@ -714,7 +722,7 @@ export async function webhookSolicitacao(
     evento,
     {
       solicitacaoId: s.id,
-      codigo: codigoSolicitacao(s.id),
+      codigo: codigoSolicitacao(s),
       titulo: s.titulo,
       cliente: { nome: s.destinatarioNome, email: s.destinatarioEmail, documento: s.documento, empresa: s.empresa },
       pasta: s.pasta,
@@ -754,7 +762,7 @@ export function resumoDaLinha(s: Solicitacao, c: Contagens): ResumoSolicitacao {
   const iso = (d: Date | null) => (d ? d.toISOString() : null)
   return {
     id: s.id,
-    codigo: codigoSolicitacao(s.id),
+    codigo: codigoSolicitacao(s),
     titulo: s.titulo,
     destinatarioNome: s.destinatarioNome,
     destinatarioEmail: s.destinatarioEmail,
@@ -905,7 +913,7 @@ export async function landingSolicitacao(s: Solicitacao): Promise<LandingSolicit
     mensagem: s.mensagem,
     nome: s.destinatarioNome,
     empresa: s.empresa,
-    codigo: codigoSolicitacao(s.id),
+    codigo: codigoSolicitacao(s),
     prazo: s.prazo,
     status: s.status as StatusSolicitacao,
     itens: itens.map(i => ({
@@ -954,9 +962,10 @@ export async function marcarNaoPossui(s: Solicitacao, item: SolicItem, justifica
   if (item.status !== 'pendente' && item.status !== 'recusado') {
     recusar(item.status === 'nao_possui' ? 'Você já marcou este item.' : 'Remova os arquivos deste item antes de marcar que não possui.', 409)
   }
+  // obrigatorio e obrigatorio: "nao tenho" nao resolve (se falta, a equipe fala com o cliente)
+  if (item.obrigatorio) recusar('Este documento é obrigatório. Se você não tiver, fale com a Contábil Gaulke.', 422)
   if ((await arquivosAtivos(item.id)).length) recusar('Remova os arquivos deste item antes de marcar que não possui.', 409)
   const texto = justificativa.trim().slice(0, 500)
-  if (item.obrigatorio && texto.length < 3) recusar('Conte rapidamente por que você não possui este documento.')
 
   const db = useDb()
   await db

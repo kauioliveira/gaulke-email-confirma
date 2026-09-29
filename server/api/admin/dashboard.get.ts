@@ -102,7 +102,7 @@ export default defineEventHandler(async event => {
   const minhasSolic = op.id
     ? await sql<{ id: number; nome: string; motivo: string; n: number }[]>`
         select s.id,
-               'SOL-' || lpad(s.id::text, 6, '0') || ' · ' || coalesce(s.empresa, s.destinatario_nome, s.destinatario_email) as nome,
+               coalesce(s.codigo, 'SOL-' || lpad(s.id::text, 6, '0')) || ' · ' || coalesce(s.empresa, s.destinatario_nome, s.destinatario_email) as nome,
                x.motivo, x.n
           from sys_mail_solic s
           cross join lateral (
@@ -133,7 +133,7 @@ export default defineEventHandler(async event => {
   // assinaturas enviadas por quem esta olhando que pedem acao
   const minhasAssin = op.id
     ? await sql<{ id: number; nome: string; motivo: string; n: number }[]>`
-        select d.id, 'ASS-' || lpad(d.id::text, 6, '0') || ' · ' || d.titulo as nome, x.motivo, x.n
+        select d.id, coalesce(d.codigo, 'ASS-' || lpad(d.id::text, 6, '0')) || ' · ' || d.titulo as nome, x.motivo, x.n
           from sys_mail_assin_documentos d
           cross join lateral (
             select 'assin_recusado' as motivo, 1 as n where d.status = 'recusado' and d.created_at > now() - interval '30 days'

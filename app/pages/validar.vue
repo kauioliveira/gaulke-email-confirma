@@ -13,15 +13,20 @@ const resultado = ref<ValidacaoAssinatura | null>(null)
 const naoEncontrado = ref(false)
 const carregando = ref(false)
 const arquivoNome = ref<string | null>(null)
+const erro = ref<string | null>(null)
+const calculando = ref(false)
 
 async function consultar(q: { c?: string; hash?: string }) {
   carregando.value = true
   resultado.value = null
   naoEncontrado.value = false
+  erro.value = null
   try {
     resultado.value = await $fetch<ValidacaoAssinatura>(api('/api/validar'), { query: q })
-  } catch {
-    naoEncontrado.value = true
+  } catch (e: any) {
+    // 404 = nada com esse codigo/PDF; o resto (rede, limite) e problema, e nao "nao encontrado"
+    if (e?.statusCode === 404 || e?.response?.status === 404) naoEncontrado.value = true
+    else erro.value = e?.statusCode === 429 ? 'Muitas consultas seguidas. Aguarde um minuto e tente de novo.' : 'Não foi possível consultar agora. Tente de novo em instantes.'
   } finally {
     carregando.value = false
   }
@@ -35,8 +40,19 @@ async function porArquivo(e: Event) {
   ;(e.target as HTMLInputElement).value = ''
   if (!f) return
   arquivoNome.value = f.name
-  const hash = await crypto.subtle.digest('SHA-256', await f.arrayBuffer())
-  consultar({ hash: [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('') })
+  resultado.value = null
+  naoEncontrado.value = false
+  erro.value = null
+  calculando.value = true
+  try {
+    // sha256Hex funciona tambem fora de HTTPS (acesso pelo IP interno)
+    const hash = await sha256Hex(await f.arrayBuffer())
+    await consultar({ hash })
+  } catch {
+    erro.value = 'Não foi possível ler este arquivo.'
+  } finally {
+    calculando.value = false
+  }
 }
 onMounted(() => { if (codigo.value) porCodigo() })
 </script>
@@ -60,7 +76,7 @@ onMounted(() => { if (codigo.value) porCodigo() })
           <label class="flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-default p-6 text-center transition hover:border-primary">
             <input type="file" accept="application/pdf,.pdf" class="sr-only" @change="porArquivo" />
             <UIcon name="i-lucide-file-search" class="size-8 text-primary" />
-            <span class="font-medium">Escolher o PDF</span>
+            <span class="font-medium">{{ calculando || (carregando && arquivoNome) ? 'Conferindo…' : arquivoNome ? `Conferido: ${arquivoNome} — escolher outro` : 'Escolher o PDF' }}</span>
             <span class="text-xs text-muted">O arquivo não sai do seu computador: só a impressão digital (SHA-256) é conferida.</span>
           </label>
         </div>
@@ -113,6 +129,8 @@ onMounted(() => { if (codigo.value) porCodigo() })
           <p v-if="resultado.finalSha256" class="break-all font-mono text-[11px] text-muted">SHA-256 do documento assinado: {{ resultado.finalSha256 }}</p>
         </div>
       </UCard>
+
+      <UAlert v-if="erro" class="mt-6" color="error" variant="subtle" icon="i-lucide-circle-alert" :title="erro" />
 
       <UCard v-if="naoEncontrado" class="mt-6">
         <div class="flex gap-3">

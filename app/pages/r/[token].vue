@@ -335,7 +335,7 @@ const textoWhatsapp = computed(() =>
                     :rows="2"
                     autoresize
                     class="w-full"
-                    :placeholder="item.obrigatorio ? 'Conte rapidamente o motivo (obrigatório)' : 'Se quiser, conte o motivo'"
+                    :placeholder="'Se quiser, conte o motivo'"
                   />
                   <div class="flex justify-end gap-2">
                     <UButton label="Voltar" size="sm" color="neutral" variant="ghost" @click="naoPossuoAberto = null" />
@@ -343,7 +343,7 @@ const textoWhatsapp = computed(() =>
                       label="Confirmar"
                       size="sm"
                       color="warning"
-                      :disabled="item.obrigatorio && justificativa.trim().length < 3"
+                      :disabled="item.obrigatorio"
                       :loading="ocupado"
                       @click="marcarNaoPossuo(item)"
                     />
@@ -373,8 +373,9 @@ const textoWhatsapp = computed(() =>
                     <input type="file" class="sr-only" accept="image/*" capture="environment" @change="escolher(item, $event)" />
                     <UButton as="span" icon="i-lucide-camera" label="Foto" color="neutral" variant="outline" class="cursor-pointer" />
                   </label>
+                  <!-- só no opcional: se é obrigatório, "não tenho" não é resposta -->
                   <UButton
-                    v-if="!ativos(item)"
+                    v-if="!ativos(item) && !item.obrigatorio"
                     label="Não possuo"
                     color="neutral"
                     variant="ghost"

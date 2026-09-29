@@ -12,6 +12,7 @@ import { certificadoParaAssinar, ErroCertificado } from '../../../utils/certific
 import {
   criarAssinaturaSchema,
   codigoAssinatura,
+  novoCodigoAssinatura,
   novoCodigoVerificacao,
   pastaDaAssinatura,
   registrarEventoAssin,
@@ -61,6 +62,7 @@ export default defineEventHandler(async event => {
   }
 
   const sha256 = createHash('sha256').update(bytes).digest('hex')
+  const codigoPublico = await novoCodigoAssinatura()
   const docId = await db.transaction(async tx => {
     const [doc] = await tx
       .insert(assinDocumentos)
@@ -77,6 +79,7 @@ export default defineEventHandler(async event => {
         originalNome: d.arquivoNome,
         originalSha256: sha256,
         originalPaginas: paginas.length,
+        codigo: codigoPublico,
         codigoVerificacao: novoCodigoVerificacao(),
         contaId: d.contaId ?? null,
         contaNome,
@@ -100,7 +103,7 @@ export default defineEventHandler(async event => {
       await tx.insert(assinCampos).values(d.campos.map(c => ({ ...c, documentoId: doc!.id, signatarioId: ids[c.signatario]! })))
     }
     // o original sai da area temporaria para a pasta do cliente
-    const originalPath = `${pasta}/${codigoAssinatura(doc!.id)}_original.pdf`
+    const originalPath = `${pasta}/${codigoAssinatura(doc!)}_original.pdf`
     const destino = caminhoDocumento(originalPath)
     await mkdir(dirname(destino), { recursive: true })
     try {
@@ -113,7 +116,7 @@ export default defineEventHandler(async event => {
     return doc!.id
   })
 
-  const codigo = codigoAssinatura(docId)
+  const codigo = codigoPublico
   await registrarEventoAssin(
     docId,
     'criado',

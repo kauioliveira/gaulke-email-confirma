@@ -42,7 +42,7 @@ const ABAS = computed(() => [
         </UButton>
       </div>
       <USwitch v-model="minhas" label="Só as que eu enviei" class="ml-auto" />
-      <UInput v-model="busca" icon="i-lucide-search" placeholder="Título, quem assina ou ASS-000045" class="w-full sm:w-72" />
+      <UInput v-model="busca" icon="i-lucide-search" placeholder="Título, quem assina ou ASS-26-X7K2P9" class="w-full sm:w-72" />
     </div>
 
     <UCard :ui="{ body: 'p-0 sm:p-0' }">

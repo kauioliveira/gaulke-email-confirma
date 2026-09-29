@@ -45,10 +45,16 @@ export function operadorDoPainel(u: UsuarioPainel): Operador {
   return { id: u.id, nome: u.nome, email: u.email, papel: papelDe(u), origem: 'painel' }
 }
 
+/**
+ * SENHA_LOCAL_EMAIL (opcional): e-mail que recebe os avisos de "quem pediu"
+ * (documentos prontos, assinou, recusou) do que for criado pela senha local.
+ * Sem ele esses avisos nao saem — a senha nao identifica ninguem. Util em
+ * desenvolvimento para testar sem entrar pelo painel.
+ */
 export const OPERADOR_SENHA_LOCAL: Operador = {
   id: null,
   nome: 'Acesso por senha local',
-  email: null,
+  email: (process.env.SENHA_LOCAL_EMAIL || '').replace(/^["']|["']$/g, '').trim().toLowerCase() || null,
   papel: 'admin',
   origem: 'senha'
 }

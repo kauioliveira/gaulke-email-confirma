@@ -238,8 +238,10 @@ export function classificar(m: ParsedMail): ResultadoClassificacao {
   }
 }
 
-const RE_SOLIC = /\bSOL-\d{6}\b/g
-const RE_ASSIN = /\bASS-\d{6}\b/g
+// atual (SOL-26-X7K2P9) ou antigo (SOL-000123), como nas assinaturas
+const RE_SOLIC = /\bSOL-(?:\d{2}-[A-Z0-9]{6}|\d{6})\b/g
+// ASS-26-X7K2P9 (atual) ou ASS-000045 (documentos de antes da migration 0015)
+const RE_ASSIN = /\bASS-(?:\d{2}-[A-Z0-9]{6}|\d{6})\b/g
 const RE_UUID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
 const RE_TOKEN_SOLIC = new RegExp(`/r/${RE_UUID}`, 'gi')
 const RE_TOKEN_ASSIN = new RegExp(`/a/${RE_UUID}`, 'gi')

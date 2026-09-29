@@ -18,6 +18,6 @@ export default defineEventHandler(async event => {
   }
   await useDb().update(assinDocumentos).set({ status: 'cancelado', canceladoEm: new Date(), canceladoPorNome: op.nome, canceladoMotivo: motivo }).where(eq(assinDocumentos.id, d.id))
   await registrarEventoAssin(d.id, 'cancelado', `Cancelado por ${op.nome}: ${motivo}`, { porNome: op.nome })
-  await auditar(event, 'assinatura.cancelar', { entidade: 'assinatura', id: d.id, resumo: `Cancelou ${codigoAssinatura(d.id)} "${d.titulo}": ${motivo}` })
+  await auditar(event, 'assinatura.cancelar', { entidade: 'assinatura', id: d.id, resumo: `Cancelou ${codigoAssinatura(d)} "${d.titulo}": ${motivo}` })
   return { ok: true }
 })
