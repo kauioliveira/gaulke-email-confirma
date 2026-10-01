@@ -88,7 +88,10 @@ const TIPO_EVENTO: Record<string, { titulo: string; icone: string; cor: Cor }> =
   resposta_email: { titulo: 'Respondeu por e-mail', icone: 'i-lucide-reply', cor: 'primary' },
   devolucao: { titulo: 'E-mail devolvido', icone: 'i-lucide-mail-x', cor: 'error' },
   auto_resposta: { titulo: 'Resposta automática', icone: 'i-lucide-bot', cor: 'neutral' },
-  recibo: { titulo: 'Recibo de leitura', icone: 'i-lucide-mail-check', cor: 'neutral' }
+  recibo: { titulo: 'Recibo de leitura', icone: 'i-lucide-mail-check', cor: 'neutral' },
+  aviso_equipe: { titulo: 'Quem pediu foi avisado', icone: 'i-lucide-bell-ring', cor: 'info' },
+  aviso_equipe_erro: { titulo: 'Falha ao avisar quem pediu', icone: 'i-lucide-bell-off', cor: 'error' },
+  aviso_equipe_sem_email: { titulo: 'Aviso não enviado (sem e-mail)', icone: 'i-lucide-bell-off', cor: 'warning' }
 }
 const tipoEvento = (t: string) => TIPO_EVENTO[t] ?? { titulo: t.replace(/_/g, ' '), icone: 'i-lucide-dot', cor: 'neutral' as Cor }
 /** classes fixas por cor: o Tailwind precisa ver o nome inteiro no código */

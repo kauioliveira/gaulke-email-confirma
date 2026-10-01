@@ -412,8 +412,18 @@ export async function enviarEmailSolic(
  * infectado). Sai pelo mesmo canal da solicitacao; sem e-mail de quem pediu
  * (acesso por senha local), fica so no historico.
  */
+/**
+ * Aviso por e-mail a quem pediu. O resultado vai para o HISTORICO da
+ * solicitacao — enviado (com a resposta do servidor SMTP), falhou (com o erro)
+ * ou sem e-mail de quem pediu — e nao so para o log do servidor, que se perde
+ * no reinicio: "fui avisado?" precisa ter resposta na tela.
+ */
 export async function avisarEquipe(s: Solicitacao, assunto: string, texto: string, lista: string[] = []) {
-  if (!s.criadoPorEmail) return
+  const quem = s.criadoPorNome || 'Quem pediu'
+  if (!s.criadoPorEmail) {
+    await registrarEventoSolic(s.id, 'aviso_equipe_sem_email', `Aviso "${assunto}" não enviado: ${quem} não tem e-mail cadastrado (acesso pela senha local sem SENHA_LOCAL_EMAIL).`)
+    return false
+  }
   const link = `${baseUrl()}/admin/solicitacoes/${s.id}`
   const blocos: Bloco[] = [
     { id: 't', tipo: 'titulo', texto: assunto },
@@ -425,15 +435,22 @@ export async function avisarEquipe(s: Solicitacao, assunto: string, texto: strin
   const html = preencherEmail(renderizarBlocos(blocos, assunto), { nome: '', email: s.criadoPorEmail, empresa: '', link, codigo: codigoSolicitacao(s) })
   try {
     const conta = await resolverConta(s.contaId)
-    await enviarEmail({
+    const info = await enviarEmail({
       conta,
       para: s.criadoPorEmail,
       assunto: `[${codigoSolicitacao(s)}] ${assunto}`,
       html,
       texto: `${assunto}\n\n${texto}\n${lista.map(l => `- ${l}`).join('\n')}\n\n${link}`
     })
+    await registrarEventoSolic(s.id, 'aviso_equipe', `${quem} foi avisado por e-mail (${s.criadoPorEmail}): "${assunto}"`, {
+      meta: { para: s.criadoPorEmail, canal: conta.nome, respostaSmtp: info.response, messageId: info.messageId }
+    })
+    return true
   } catch (e) {
-    console.error('[gaulke-mail] aviso interno da solicitacao', s.id, e instanceof Error ? e.message : e)
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[gaulke-mail] aviso interno da solicitacao', s.id, msg)
+    await registrarEventoSolic(s.id, 'aviso_equipe_erro', `Falha ao avisar ${quem} (${s.criadoPorEmail}) — "${assunto}": ${msg}`, { meta: { para: s.criadoPorEmail } })
+    return false
   }
 }
 
@@ -705,7 +722,6 @@ export async function avisarEntregasConcluidas() {
       `${s.destinatarioNome || s.destinatarioEmail}${s.empresa ? ` (${s.empresa})` : ''} entregou os documentos obrigatórios de "${s.titulo}".`,
       analisar.map(i => (i.status === 'nao_possui' ? `${i.titulo} — informou que não possui` : i.titulo))
     )
-    await registrarEventoSolic(s.id, 'aviso_equipe', `${s.criadoPorNome || 'Quem pediu'} foi avisado de que há documentos para analisar`)
     await webhookSolicitacao('solicitacao.entregue', s, {
       itens: analisar.map(i => ({ titulo: i.titulo, status: i.status }))
     })

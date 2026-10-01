@@ -205,6 +205,8 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
   item_recusar: 'i-lucide-circle-x',
   item_desfazer: 'i-lucide-undo-2',
   aviso_equipe: 'i-lucide-bell-ring',
+  aviso_equipe_erro: 'i-lucide-bell-off',
+  aviso_equipe_sem_email: 'i-lucide-bell-off',
   concluida: 'i-lucide-badge-check',
   reaberta: 'i-lucide-rotate-ccw',
   cancelada: 'i-lucide-ban',

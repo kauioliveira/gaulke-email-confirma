@@ -443,8 +443,13 @@ export async function recusar(doc: AssinDocumento, s: AssinSignatario, motivo: s
   await avisarQuemPediu(doc, `Assinatura recusada: ${doc.titulo}`, `${s.nome} (${s.email}) recusou assinar "${doc.titulo}".`, [`Motivo: ${texto}`])
 }
 
+/** Aviso a quem criou. O resultado (enviado, falhou, sem e-mail) vai para o historico, como nas solicitacoes. */
 export async function avisarQuemPediu(doc: AssinDocumento, assunto: string, texto: string, lista: string[] = [], anexo?: Buffer) {
-  if (!doc.criadoPorEmail) return
+  const quem = doc.criadoPorNome || 'Quem pediu'
+  if (!doc.criadoPorEmail) {
+    await registrarEventoAssin(doc.id, 'aviso_equipe_sem_email', `Aviso "${assunto}" não enviado: ${quem} não tem e-mail cadastrado.`)
+    return false
+  }
   const link = `${baseUrl()}/admin/assinaturas/${doc.id}`
   const blocos: Bloco[] = [
     { id: 't', tipo: 'titulo', texto: assunto },
@@ -454,7 +459,7 @@ export async function avisarQuemPediu(doc: AssinDocumento, assunto: string, text
     { id: 'r', tipo: 'rodape', texto: 'Aviso automático do Gaulke Comunica.' }
   ]
   try {
-    await enviarEmail({
+    const info = await enviarEmail({
       conta: await resolverConta(doc.contaId),
       para: doc.criadoPorEmail,
       assunto: `[${codigoAssinatura(doc)}] ${assunto}`,
@@ -462,8 +467,13 @@ export async function avisarQuemPediu(doc: AssinDocumento, assunto: string, text
       texto: `${assunto}\n\n${texto}\n${lista.map(l => `- ${l}`).join('\n')}\n\n${link}`,
       ...(anexo ? { anexos: [{ nome: `${codigoAssinatura(doc)}_assinado.pdf`, conteudo: anexo, tipo: 'application/pdf' }] } : {})
     })
+    await registrarEventoAssin(doc.id, 'aviso_equipe', `${quem} foi avisado por e-mail (${doc.criadoPorEmail}): "${assunto}" — ${info.response}`)
+    return true
   } catch (e) {
-    console.error('[gaulke-mail] aviso da assinatura', doc.id, e instanceof Error ? e.message : e)
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[gaulke-mail] aviso da assinatura', doc.id, msg)
+    await registrarEventoAssin(doc.id, 'aviso_equipe_erro', `Falha ao avisar ${quem} (${doc.criadoPorEmail}) — "${assunto}": ${msg}`)
+    return false
   }
 }
 
