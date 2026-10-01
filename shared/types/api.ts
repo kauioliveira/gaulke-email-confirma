@@ -34,6 +34,9 @@ export interface Template {
   categoria: string | null
   /** oficial: só supervisor/admin editam; os demais duplicam */
   oficial: boolean
+  /** setor que vê o template; null = todos os setores */
+  departamentoId: number | null
+  departamentoNome: string | null
   arquivadoEm: string | null
   criadoPorNome: string | null
   atualizadoPorNome: string | null
@@ -545,6 +548,12 @@ export type OrigemSessao = 'painel' | 'senha' | 'painel-invalido' | 'nenhuma'
 /** Papel do operador: limita as ACOES, nao o acesso (todo usuario ativo entra). */
 export type PapelOperador = 'usuario' | 'supervisor' | 'admin'
 
+export interface RespostaDepartamentos {
+  /** o que a pessoa pode escolher: todos para o admin, só o próprio para os demais */
+  departamentos: { id: number; nome: string }[]
+  meu: number | null
+}
+
 export interface RespostaSessao {
   autenticado: boolean
   origem: OrigemSessao
@@ -610,7 +619,9 @@ export interface ModeloChecklist {
   id: number
   nome: string
   descricao: string | null
+  /** nome do setor; null = todos os setores */
   setor: string | null
+  departamentoId: number | null
   ativo: boolean
   criadoPorNome: string | null
   atualizadoPorNome: string | null

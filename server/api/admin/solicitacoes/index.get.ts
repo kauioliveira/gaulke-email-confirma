@@ -1,6 +1,6 @@
 import { and, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm'
 import { useDb, solicitacoes } from '../../../db'
-import { operadorAtual } from '../../../utils/permissoes'
+import { operadorAtual, filtroSetor } from '../../../utils/permissoes'
 import { CONTAGENS_SOLIC, resumoDaLinha } from '../../../utils/solicitacoes'
 
 /**
@@ -8,6 +8,8 @@ import { CONTAGENS_SOLIC, resumoDaLinha } from '../../../utils/solicitacoes'
  *   status   aberta | em_analise | concluida | cancelada | atrasada | analisar
  *   minhas=1 so as que eu pedi
  *   busca    cliente, e-mail, empresa, CPF/CNPJ, titulo ou SOL-26-X7K2P9
+ *
+ * Fora o admin, cada um ve so as do proprio setor (filtroSetor).
  */
 export default defineEventHandler(async event => {
   const op = operadorAtual(event)
@@ -17,7 +19,8 @@ export default defineEventHandler(async event => {
   const pagina = Math.max(1, Number(q.pagina) || 1)
   const porPagina = 50
 
-  const cond: SQL[] = []
+  const doSetor = filtroSetor(op, solicitacoes.departamentoId)
+  const cond: SQL[] = doSetor ? [doSetor] : []
   if (status === 'atrasada') {
     cond.push(eq(solicitacoes.status, 'aberta'), sql`${solicitacoes.prazo} < (now() at time zone 'America/Sao_Paulo')::date`)
   } else if (status === 'analisar') {
@@ -61,8 +64,10 @@ export default defineEventHandler(async event => {
     .from(solicitacoes)
     .where(onde)
 
-  // contadores das abas, sempre do universo inteiro (respeitando "minhas")
+  // contadores das abas, sempre do universo inteiro (respeitando "minhas" e o setor)
   const minhas = q.minhas === '1' && op.id ? sql`and criado_por_user_id = ${op.id}` : sql``
+  // pelo alias: o drizzle escreveria "sys_mail_solic"."departamento_id", invalido com o "s"
+  const setorS = filtroSetor(op, sql.raw('s.departamento_id'))
   const [contadores] = await db.execute<{ aberta: number; em_analise: number; atrasada: number; analisar: number }>(sql`
     select
       count(*) filter (where status = 'aberta')::int as aberta,
@@ -71,7 +76,7 @@ export default defineEventHandler(async event => {
       count(*) filter (where status in ('aberta', 'em_analise') and exists (
         select 1 from sys_mail_solic_itens i where i.solic_id = s.id
            and (i.status = 'enviado' or (i.status = 'nao_possui' and i.analisado_em is null))))::int as analisar
-    from sys_mail_solic s where true ${minhas}`)
+    from sys_mail_solic s where true ${minhas} ${setorS ? sql`and ${setorS}` : sql``}`)
 
   return {
     solicitacoes: linhas.map(l => resumoDaLinha(l.s, l.c as never)),

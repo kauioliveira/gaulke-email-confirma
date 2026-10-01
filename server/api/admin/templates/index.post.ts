@@ -1,5 +1,5 @@
 import { useDb, templates } from '../../../db'
-import { operadorAtual } from '../../../utils/permissoes'
+import { operadorAtual, setorAoSalvar } from '../../../utils/permissoes'
 import { auditar } from '../../../utils/auditoria'
 import { templateSchema, htmlDoTemplate, exigirPodeMarcarOficial, salvarVersao } from '../../../utils/templates'
 
@@ -23,6 +23,8 @@ export default defineEventHandler(async event => {
       tipo: dados.tipo ?? null,
       categoria: dados.categoria || null,
       oficial: dados.oficial ?? false,
+      // sem escolha, nasce no setor de quem criou
+      departamentoId: dados.departamentoId === undefined ? op.departamentoId : setorAoSalvar(op, dados.departamentoId),
       criadoPorUserId: op.id,
       criadoPorNome: op.nome,
       atualizadoPorUserId: op.id,

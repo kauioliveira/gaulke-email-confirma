@@ -87,6 +87,7 @@ export default defineEventHandler(async event => {
         criadoPorUserId: op.id,
         criadoPorNome: op.nome,
         criadoPorEmail: op.email,
+        departamentoId: op.departamentoId,
         enviadoEm: new Date()
       })
       .returning()

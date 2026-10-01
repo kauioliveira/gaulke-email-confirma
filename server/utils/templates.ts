@@ -27,7 +27,9 @@ export const templateSchema = z.object({
   blocos: blocosSchema.optional(),
   tipo: z.enum(TIPOS_TEMPLATE).nullish(),
   categoria: z.string().trim().max(60).nullish(),
-  oficial: z.boolean().optional()
+  oficial: z.boolean().optional(),
+  // setor que ve o template; null = todos, ausente = nao muda (veja setorAoSalvar)
+  departamentoId: z.number().int().positive().nullish()
 })
 export type DadosTemplate = z.output<typeof templateSchema>
 

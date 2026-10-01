@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { useDb, templates } from '../../../db'
-import { operadorAtual } from '../../../utils/permissoes'
+import { operadorAtual, setorAoSalvar } from '../../../utils/permissoes'
 import { auditar } from '../../../utils/auditoria'
 import {
   templateSchema,
@@ -34,6 +34,7 @@ export default defineEventHandler(async event => {
       tipo: dados.tipo ?? antes.tipo,
       categoria: dados.categoria === undefined ? antes.categoria : dados.categoria || null,
       oficial: dados.oficial ?? antes.oficial,
+      departamentoId: dados.departamentoId === undefined ? antes.departamentoId : setorAoSalvar(op, dados.departamentoId),
       atualizadoPorUserId: op.id,
       atualizadoPorNome: op.nome,
       updatedAt: new Date()
@@ -46,7 +47,7 @@ export default defineEventHandler(async event => {
   // o conteudo inteiro nao vai para a trilha (pode ter dezenas de KB): ele
   // fica no historico de versoes
   const mudou = Object.fromEntries(
-    (['nome', 'assunto', 'formato', 'tipo', 'categoria', 'oficial'] as const)
+    (['nome', 'assunto', 'formato', 'tipo', 'categoria', 'oficial', 'departamentoId'] as const)
       .filter(k => antes[k] !== t![k])
       .map(k => [k, { de: antes[k], para: t![k] }])
   )

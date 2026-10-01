@@ -103,6 +103,8 @@ export const templates = pgTable('sys_mail_templates', {
   categoria: varchar('categoria', { length: 60 }),
   // oficial: so supervisor/admin editam; os demais duplicam
   oficial: boolean('oficial').default(false).notNull(),
+  // setor que ve o template (public.department); nulo = todos (migration 0017)
+  departamentoId: integer('departamento_id'),
   arquivadoEm: timestamp('arquivado_em', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
@@ -433,7 +435,10 @@ export const checklists = pgTable('sys_mail_checklists', {
   id: serial('id').primaryKey(),
   nome: varchar('nome', { length: 160 }).notNull(),
   descricao: text('descricao'),
+  // texto livre antigo; quem manda agora e departamentoId (migration 0017)
   setor: varchar('setor', { length: 60 }),
+  // setor que ve o modelo (public.department); nulo = todos
+  departamentoId: integer('departamento_id'),
   ativo: boolean('ativo').default(true).notNull(),
   criadoPorNome: varchar('criado_por_nome', { length: 255 }),
   atualizadoPorNome: varchar('atualizado_por_nome', { length: 255 }),
@@ -489,6 +494,8 @@ export const solicitacoes = pgTable('sys_mail_solic', {
   criadoPorUserId: integer('criado_por_user_id'),
   criadoPorNome: varchar('criado_por_nome', { length: 255 }),
   criadoPorEmail: varchar('criado_por_email', { length: 320 }),
+  // setor de quem pediu, no momento do pedido (public.department; migration 0017)
+  departamentoId: integer('departamento_id'),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }),
   concluidaEm: timestamp('concluida_em', { withTimezone: true }),
   concluidaPorNome: varchar('concluida_por_nome', { length: 255 }),
@@ -611,6 +618,8 @@ export const assinDocumentos = pgTable('sys_mail_assin_documentos', {
   criadoPorUserId: integer('criado_por_user_id'),
   criadoPorNome: varchar('criado_por_nome', { length: 255 }),
   criadoPorEmail: varchar('criado_por_email', { length: 320 }),
+  // setor de quem enviou, no momento do envio (public.department; migration 0017)
+  departamentoId: integer('departamento_id'),
   enviadoEm: timestamp('enviado_em', { withTimezone: true }),
   concluidoEm: timestamp('concluido_em', { withTimezone: true }),
   finalizacaoErro: text('finalizacao_erro'),

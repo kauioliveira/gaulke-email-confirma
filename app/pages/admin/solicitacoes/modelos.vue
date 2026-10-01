@@ -6,9 +6,13 @@ useHead({ title: 'Modelos de checklist — Gaulke Comunica' })
  * Modelos de checklist: a lista de documentos pronta para "Abertura de
  * empresa", "Admissão", "IRPF"... Editar um modelo não muda as solicitações
  * já enviadas: cada uma guardou a sua cópia.
+ *
+ * Cada modelo é de um setor (ou de todos); fora o admin, aparecem só os do
+ * próprio setor e os de todos.
  */
 const toast = useToast()
 const { pode } = usePapel()
+const setores = useDepartamentos()
 const mostrarArquivados = ref(false)
 const { data: modelos, refresh } = await useFetch<ModeloChecklist[]>(api('/api/admin/checklists'), {
   query: computed(() => ({ todos: mostrarArquivados.value ? '1' : undefined })),
@@ -17,7 +21,7 @@ const { data: modelos, refresh } = await useFetch<ModeloChecklist[]>(api('/api/a
 
 const porSetor = computed(() => {
   const g = new Map<string, ModeloChecklist[]>()
-  for (const m of modelos.value) g.set(m.setor || 'Geral', [...(g.get(m.setor || 'Geral') ?? []), m])
+  for (const m of modelos.value) g.set(m.setor || 'Todos os setores', [...(g.get(m.setor || 'Todos os setores') ?? []), m])
   return [...g]
 })
 
@@ -25,14 +29,14 @@ const editando = ref<{ id: number | null; nome: string; descricao: string; setor
 const salvando = ref(false)
 
 function novo() {
-  editando.value = { id: null, nome: '', descricao: '', setor: '', itens: [] }
+  editando.value = { id: null, nome: '', descricao: '', setor: setores.padrao.value, itens: [] }
 }
 function editar(m: ModeloChecklist) {
   editando.value = {
     id: m.id,
     nome: m.nome,
     descricao: m.descricao ?? '',
-    setor: m.setor ?? '',
+    setor: setores.paraValor(m.departamentoId),
     itens: m.itens.map(i => ({ ...i, tipos: [...i.tipos] }))
   }
 }
@@ -45,7 +49,7 @@ async function salvar() {
   if (!e) return
   salvando.value = true
   try {
-    const body = { nome: e.nome, descricao: e.descricao || null, setor: e.setor || null, itens: e.itens }
+    const body = { nome: e.nome, descricao: e.descricao || null, departamentoId: setores.paraId(e.setor), itens: e.itens }
     if (e.id) await $fetch(api(`/api/admin/checklists/${e.id}`), { method: 'PUT', body })
     else await $fetch(api('/api/admin/checklists'), { method: 'POST', body })
     toast.add({ title: 'Modelo salvo', color: 'success' })
@@ -131,7 +135,7 @@ async function arquivar(m: ModeloChecklist, restaurar = false) {
               <UInput v-model="editando.nome" class="w-full" placeholder="Ex.: Abertura de empresa" />
             </UFormField>
             <UFormField label="Setor">
-              <USelect v-model="editando.setor" :items="SETORES.map(s => ({ label: s, value: s as string }))" placeholder="Escolha" class="w-full" />
+              <USelect v-model="editando.setor" :items="setores.opcoes.value" class="w-full" />
             </UFormField>
           </div>
           <UFormField label="Descrição">

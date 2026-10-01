@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import { sql, type SQL, type SQLWrapper } from 'drizzle-orm'
 import type { UsuarioPainel } from './sessao-painel'
 
 /**
@@ -25,6 +26,8 @@ export type Operador = {
   email: string | null
   papel: Papel
   origem: 'painel' | 'senha'
+  /** setor do cadastro do painel; nulo na senha local */
+  departamentoId: number | null
 }
 
 const NIVEL: Record<Papel, number> = { usuario: 0, supervisor: 1, admin: 2 }
@@ -42,7 +45,7 @@ export function papelDe(u: Pick<UsuarioPainel, 'isAdmin' | 'isSupervisor'>): Pap
 }
 
 export function operadorDoPainel(u: UsuarioPainel): Operador {
-  return { id: u.id, nome: u.nome, email: u.email, papel: papelDe(u), origem: 'painel' }
+  return { id: u.id, nome: u.nome, email: u.email, papel: papelDe(u), origem: 'painel', departamentoId: u.departamentoId }
 }
 
 /**
@@ -56,7 +59,8 @@ export const OPERADOR_SENHA_LOCAL: Operador = {
   nome: 'Acesso por senha local',
   email: (process.env.SENHA_LOCAL_EMAIL || '').replace(/^["']|["']$/g, '').trim().toLowerCase() || null,
   papel: 'admin',
-  origem: 'senha'
+  origem: 'senha',
+  departamentoId: null
 }
 
 /** O papel alcanca o minimo? Admin alcanca supervisor; supervisor alcanca usuario. */
@@ -85,6 +89,39 @@ export function exigirPapel(event: H3Event, minimo: Papel, acao?: string): Opera
     })
   }
   return op
+}
+
+/**
+ * Visibilidade por setor (solicitacoes, assinaturas, templates e modelos).
+ *
+ * Admin ve tudo; supervisor e usuario veem so o proprio setor. Isso FILTRA as
+ * listas — nao e uma barreira em cada rota por id: e uma ferramenta interna,
+ * usada so pela equipe, e a ideia e cada setor nao tropecar no trabalho dos
+ * outros, nao esconder segredo.
+ *
+ * Devolve o setor a filtrar, ou `undefined` quando nao ha filtro (admin).
+ * Quem nao tem setor no cadastro so ve o que tambem esta sem setor.
+ */
+export function setorVisivel(op: Pick<Operador, 'papel' | 'departamentoId'>): number | null | undefined {
+  return op.papel === 'admin' ? undefined : op.departamentoId
+}
+
+/**
+ * Condicao "do setor visivel" sobre a coluna de setor, ou `undefined` (admin).
+ * `is not distinct from` para quem nao tem setor casar com as linhas sem setor.
+ */
+export function filtroSetor(op: Pick<Operador, 'papel' | 'departamentoId'>, coluna: SQLWrapper): SQL | undefined {
+  const setor = setorVisivel(op)
+  return setor === undefined ? undefined : sql`${coluna} is not distinct from ${setor}`
+}
+
+/**
+ * Setor de um template/modelo ao salvar. Nulo = todos os setores. So o admin
+ * escolhe um setor que nao e o seu; os demais ficam entre o proprio e "todos".
+ */
+export function setorAoSalvar(op: Pick<Operador, 'papel' | 'departamentoId'>, pedido: number | null | undefined) {
+  if (pedido == null) return null
+  return op.papel === 'admin' ? pedido : op.departamentoId
 }
 
 declare module 'h3' {

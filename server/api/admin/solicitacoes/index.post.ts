@@ -72,7 +72,8 @@ export default defineEventHandler(async event => {
           avisarConclusao: d.avisarConclusao,
           criadoPorUserId: op.id,
           criadoPorNome: op.nome,
-          criadoPorEmail: op.email
+          criadoPorEmail: op.email,
+          departamentoId: op.departamentoId
         })
         .returning()
       const pasta = pastaDaSolicitacao(s!)

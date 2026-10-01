@@ -7,7 +7,7 @@ import { salvarVersao } from '../../../../utils/templates'
 /**
  * Cria uma copia editavel. E o caminho mais comum para um template novo — e o
  * unico para quem quer partir de um template oficial sem poder altera-lo. A
- * copia nunca nasce oficial e pertence a quem duplicou.
+ * copia nunca nasce oficial e pertence a quem duplicou (e ao setor dele).
  */
 export default defineEventHandler(async event => {
   const op = operadorAtual(event)
@@ -29,6 +29,7 @@ export default defineEventHandler(async event => {
       tipo: t.tipo,
       categoria: t.categoria,
       oficial: false,
+      departamentoId: op.departamentoId,
       criadoPorUserId: op.id,
       criadoPorNome: op.nome,
       atualizadoPorUserId: op.id,

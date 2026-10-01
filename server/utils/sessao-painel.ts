@@ -31,6 +31,8 @@ export type UsuarioPainel = {
   email: string | null
   isAdmin: boolean
   isSupervisor: boolean
+  /** setor no cadastro do painel (public.department); define o que a pessoa ve */
+  departamentoId: number | null
 }
 
 function hashToken(token: string) {
@@ -57,9 +59,9 @@ export async function usuarioDaSessaoPainel(event: H3Event): Promise<UsuarioPain
     // `character(64)` no banco: o hex do sha256 tem exatamente 64 caracteres,
     // entao nao ha padding para acertar.
     const linhas = await sql<
-      { user_id: number; fullname: string; username: string; is_admin: boolean; is_supervisor: boolean }[]
+      { user_id: number; fullname: string; username: string; is_admin: boolean; is_supervisor: boolean; department_id: number | null }[]
     >`
-      select s.user_id, u.fullname, u.username, u.is_admin, u.is_supervisor
+      select s.user_id, u.fullname, u.username, u.is_admin, u.is_supervisor, u.department_id
         from public.user_session s
         join public.users u on u.id = s.user_id
        where s.token_hash = ${hashToken(token)}
@@ -77,6 +79,7 @@ export async function usuarioDaSessaoPainel(event: H3Event): Promise<UsuarioPain
       email: l.username?.includes('@') ? l.username.toLowerCase() : null,
       isAdmin: Boolean(l.is_admin),
       isSupervisor: Boolean(l.is_supervisor),
+      departamentoId: l.department_id ?? null,
     }
   } catch (e) {
     console.error('[gaulke-mail] falha ao ler a sessao do painel:', e instanceof Error ? e.message : e)

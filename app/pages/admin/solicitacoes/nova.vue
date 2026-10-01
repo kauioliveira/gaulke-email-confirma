@@ -9,6 +9,7 @@ useHead({ title: 'Nova solicitação — Gaulke Comunica' })
  */
 const toast = useToast()
 const { sessao } = usePapel()
+const setores = useDepartamentos()
 
 type Destinatario = { nome: string; email: string; documento: string; empresa: string }
 
@@ -29,7 +30,7 @@ const titulo = ref('')
 const porSetor = computed(() => {
   const g = new Map<string, ModeloChecklist[]>()
   for (const m of modelos.value) {
-    const k = m.setor || 'Geral'
+    const k = m.setor || 'Todos os setores'
     g.set(k, [...(g.get(k) ?? []), m])
   }
   return [...g]
@@ -47,12 +48,14 @@ const itensValidos = computed(() => itens.value.length > 0 && itens.value.every(
 const salvandoModelo = ref(false)
 const modalModelo = ref(false)
 const novoModelo = reactive({ nome: '', setor: '' })
+// o seletor abre no setor de quem cria
+watch(modalModelo, aberto => { if (aberto && !novoModelo.setor) novoModelo.setor = setores.padrao.value })
 async function salvarComoModelo() {
   salvandoModelo.value = true
   try {
     const r = await $fetch<{ id: number }>(api('/api/admin/checklists'), {
       method: 'POST',
-      body: { nome: novoModelo.nome, setor: novoModelo.setor || null, itens: itens.value }
+      body: { nome: novoModelo.nome, departamentoId: setores.paraId(novoModelo.setor || setores.padrao.value), itens: itens.value }
     })
     checklistId.value = r.id
     modalModelo.value = false
@@ -491,14 +494,14 @@ async function enviar() {
     </div>
 
     <!-- salvar como modelo -->
-    <UModal v-model:open="modalModelo" title="Salvar como modelo de checklist" description="Fica disponível para todos no primeiro passo.">
+    <UModal v-model:open="modalModelo" title="Salvar como modelo de checklist" description="Fica disponível no primeiro passo para o setor escolhido.">
       <template #body>
         <div class="space-y-4">
           <UFormField label="Nome do modelo" required>
             <UInput v-model="novoModelo.nome" class="w-full" />
           </UFormField>
           <UFormField label="Setor">
-            <USelect v-model="novoModelo.setor" :items="SETORES.map(s => ({ label: s, value: s as string }))" placeholder="Escolha" class="w-full" />
+            <USelect v-model="novoModelo.setor" :items="setores.opcoes.value" class="w-full" />
           </UFormField>
         </div>
       </template>

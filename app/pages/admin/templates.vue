@@ -11,6 +11,9 @@ import { variaveisDesconhecidas } from '~/utils/variaveis'
  *
  * Template OFICIAL só é editado por supervisor/admin; os demais usam
  * "Duplicar". O servidor confere tudo — a tela só evita o clique inútil.
+ *
+ * Cada template é de um setor (ou de todos); fora o admin, aparecem só os do
+ * próprio setor e os de todos.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin' })
 useHead({ title: 'Templates — Gaulke Comunica' })
@@ -18,6 +21,7 @@ useHead({ title: 'Templates — Gaulke Comunica' })
 const route = useRoute()
 const toast = useToast()
 const { sessao, eSupervisor } = usePapel()
+const setores = useDepartamentos()
 
 /* ---------- lista ---------- */
 const filtro = reactive({ busca: '', categoria: 'todas', arquivados: false })
@@ -59,7 +63,8 @@ const form = reactive({
   blocos: [] as Bloco[],
   tipo: 'documento' as TipoTemplate,
   categoria: '',
-  oficial: false
+  oficial: false,
+  setor: 'todos'
 })
 /** foto do formulário ao abrir, para saber se há alteração não salva */
 const original = ref('')
@@ -82,7 +87,8 @@ function carregar(t: Template) {
     blocos: Array.isArray(t.blocos) && t.blocos.length ? (JSON.parse(JSON.stringify(t.blocos)) as Bloco[]) : blocosPadraoCliente(),
     tipo: t.tipo ?? 'documento',
     categoria: t.categoria ?? '',
-    oficial: t.oficial
+    oficial: t.oficial,
+    setor: setores.paraValor(t.departamentoId)
   })
   original.value = foto()
   modo.value = 'editor'
@@ -134,7 +140,13 @@ async function salvar() {
   try {
     const r = await $fetch<{ versao: number }>(api(`/api/admin/templates/${selecionadoId.value}`), {
       method: 'PUT',
-      body: { ...form, categoria: form.categoria || null, oficial: eSupervisor.value ? form.oficial : undefined }
+      body: {
+        ...form,
+        setor: undefined,
+        departamentoId: setores.paraId(form.setor),
+        categoria: form.categoria || null,
+        oficial: eSupervisor.value ? form.oficial : undefined
+      }
     })
     original.value = foto()
     await refresh()
@@ -274,6 +286,7 @@ onBeforeRouteLeave(() => confirmarSaida())
             <p class="truncate text-xs text-muted">{{ t.assunto }}</p>
             <div class="flex flex-wrap items-center gap-1">
               <UBadge v-if="t.categoria" :label="t.categoria" color="neutral" variant="subtle" size="xs" />
+              <UBadge v-if="t.departamentoNome" :label="t.departamentoNome" color="primary" variant="subtle" size="xs" icon="i-lucide-building-2" />
               <UBadge v-if="t.arquivadoEm" label="arquivado" color="neutral" variant="outline" size="xs" icon="i-lucide-archive" />
               <span class="text-xs text-muted">
                 {{ t.usos ? `usado em ${t.usos} envio(s)` : 'nunca usado' }}
@@ -346,7 +359,7 @@ onBeforeRouteLeave(() => confirmarSaida())
                 <UInput v-model="form.assunto" class="w-full" />
               </UFormField>
             </div>
-            <div class="grid gap-4 sm:grid-cols-3">
+            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <UFormField label="Tipo">
                 <USelect
                   v-model="form.tipo"
@@ -357,11 +370,14 @@ onBeforeRouteLeave(() => confirmarSaida())
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="Categoria (setor)">
+              <UFormField label="Categoria">
                 <UInput v-model="form.categoria" class="w-full" placeholder="Ex.: Fiscal" list="gk-categorias" />
                 <datalist id="gk-categorias">
                   <option v-for="c in categoriasSugeridas" :key="c" :value="c" />
                 </datalist>
+              </UFormField>
+              <UFormField label="Setor" help="Quem vê este template. O administrador vê todos.">
+                <USelect v-model="form.setor" :items="setores.opcoes.value" class="w-full" />
               </UFormField>
               <UFormField v-if="eSupervisor" label="Oficial" help="Só supervisores e administradores editam.">
                 <USwitch v-model="form.oficial" :label="form.oficial ? 'Sim' : 'Não'" />

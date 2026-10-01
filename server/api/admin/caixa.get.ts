@@ -1,11 +1,15 @@
 import { and, desc, eq, isNull, sql, type SQL } from 'drizzle-orm'
 import { useDb, inbound, recipients, batches, solicitacoes, assinDocumentos } from '../../db'
+import { operadorAtual, setorVisivel } from '../../utils/permissoes'
 
 /**
  * Caixa de entrada: o que o monitor leu das caixas dos canais.
  *
  * Mensagens SEM VINCULO (que nao se ligam a nenhum envio) aparecem so com
  * remetente e assunto — o corpo nao e guardado.
+ *
+ * Respostas de solicitacao/assinatura de OUTRO setor ficam de fora (o admin ve
+ * tudo), como nas listas desses modulos.
  */
 export default defineEventHandler(async event => {
   const q = getQuery(event)
@@ -19,6 +23,16 @@ export default defineEventHandler(async event => {
   // sem vinculo = nao liga a lote, nem a solicitacao, nem a assinatura
   const semNada = sql`${inbound.recipientId} is null and ${inbound.solicId} is null and ${inbound.assinDocumentoId} is null`
   if (semVinculo) cond.push(semNada)
+  const setor = setorVisivel(operadorAtual(event))
+  const doSetor: SQL[] = []
+  if (setor !== undefined) {
+    // qualificado a mao: solic e assinatura tem as duas a coluna departamento_id
+    doSetor.push(sql`not exists (select 1 from sys_mail_solic s where s.id = sys_mail_inbound.solic_id
+                                and s.departamento_id is distinct from ${setor})`)
+    doSetor.push(sql`not exists (select 1 from sys_mail_assin_documentos d where d.id = sys_mail_inbound.assin_documento_id
+                                and d.departamento_id is distinct from ${setor})`)
+    cond.push(...doSetor)
+  }
   const where = cond.length ? and(...cond) : undefined
   const db = useDb()
 
@@ -63,6 +77,7 @@ export default defineEventHandler(async event => {
     db
       .select({ classificacao: inbound.classificacao, n: sql<number>`count(*)::int`, semVinculo: sql<number>`count(*) filter (where ${semNada})::int` })
       .from(inbound)
+      .where(doSetor.length ? and(...doSetor) : undefined)
       .groupBy(inbound.classificacao)
   ])
 

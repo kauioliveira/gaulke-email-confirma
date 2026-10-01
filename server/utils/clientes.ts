@@ -105,8 +105,14 @@ const ROTULO_CAIXA: Record<string, string> = {
   aviso_servidor: 'Aviso do servidor'
 }
 
-export async function linhaDoTempo(o: { email?: string | null; documento?: string | null }): Promise<LinhaDoTempoCliente> {
+/**
+ * `setor` (de setorVisivel): solicitacoes e assinaturas de outro setor ficam
+ * de fora; `undefined` = todas (admin).
+ */
+export async function linhaDoTempo(o: { email?: string | null; documento?: string | null; setor?: number | null }): Promise<LinhaDoTempoCliente> {
   const sql = useSql()
+  const todosSetores = o.setor === undefined
+  const setor = o.setor ?? null
   const emails = new Set<string>()
   const documentos = new Set<string>()
   if (o.email) emails.add(o.email.trim().toLowerCase())
@@ -183,7 +189,8 @@ export async function linhaDoTempo(o: { email?: string | null; documento?: strin
            (select count(*)::int from sys_mail_solic_itens i where i.solic_id = s.id and i.status in ('aprovado', 'nao_possui')) as resolvidos,
            (select count(*)::int from sys_mail_solic_arquivos a where a.solic_id = s.id and a.removido_em is null) as arquivos
       from sys_mail_solic s
-     where lower(s.destinatario_email) = any(${E}::text[]) or s.documento = any(${D}::text[])
+     where (lower(s.destinatario_email) = any(${E}::text[]) or s.documento = any(${D}::text[]))
+       and (${todosSetores}::boolean or s.departamento_id is not distinct from ${setor}::int)
      order by s.created_at desc
      limit 200`
   for (const s of solics) {
@@ -212,12 +219,14 @@ export async function linhaDoTempo(o: { email?: string | null; documento?: strin
            s.email, s.assinado_em, d.created_at, d.enviado_em, d.criado_por_nome, s.papel
       from sys_mail_assin_documentos d
       join sys_mail_assin_signatarios s on s.documento_id = d.id
-     where lower(s.email) = any(${E}::text[]) or s.cpf = any(${D}::text[])
+     where (lower(s.email) = any(${E}::text[]) or s.cpf = any(${D}::text[]))
+       and (${todosSetores}::boolean or d.departamento_id is not distinct from ${setor}::int)
     union all
     -- documento DA empresa, assinado por outras pessoas (socio, procurador)
     select d.id, null, d.titulo, d.status, null, null, null, d.created_at, d.enviado_em, d.criado_por_nome, null
       from sys_mail_assin_documentos d
      where d.cliente_documento = any(${D}::text[])
+       and (${todosSetores}::boolean or d.departamento_id is not distinct from ${setor}::int)
        and not exists (select 1 from sys_mail_assin_signatarios s
                         where s.documento_id = d.id and (lower(s.email) = any(${E}::text[]) or s.cpf = any(${D}::text[])))
      order by created_at desc
