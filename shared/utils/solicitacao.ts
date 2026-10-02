@@ -53,3 +53,47 @@ export function solicitacaoAtrasada(s: { status: StatusSolicitacao; prazo: strin
 export function formatarPrazo(prazo: string | null | undefined) {
   return prazo ? formatarData(`${prazo}T12:00:00${DESLOCAMENTO_SP}`) : '—'
 }
+
+/**
+ * Variaveis do texto da solicitacao ({{nome}}, {{empresa}}, {{email}},
+ * {{codigo}}), iguais no e-mail, no titulo e na pagina do cliente.
+ *
+ *   {{#empresa}}... de {{empresa}}{{/empresa}}  some inteiro sem empresa
+ *   {{empresa}} solto e sem empresa             vira "sua empresa"
+ *   {{nome}} sem nome                           vira o comeco do e-mail
+ *
+ * Assim nunca sobra a tag crua nem um "para a ." no meio da frase.
+ * `escapar` e para quando o resultado vai dentro de HTML.
+ */
+export function preencherVariaveis(
+  texto: string,
+  v: { nome?: string | null; email?: string | null; empresa?: string | null; codigo?: string | null },
+  escapar: (s: string) => string = s => s
+) {
+  const brutos: Record<string, string> = {
+    nome: (v.nome || '').trim(),
+    email: (v.email || '').trim(),
+    empresa: (v.empresa || '').trim(),
+    codigo: (v.codigo || '').trim()
+  }
+  const reserva: Record<string, string> = {
+    nome: (v.email || '').split('@')[0] || 'cliente',
+    empresa: 'sua empresa'
+  }
+  return texto
+    .replace(/\{\{\s*#(\w+)\s*\}\}([\s\S]*?)\{\{\s*\/\1\s*\}\}/g, (m, k: string, corpo: string) => (k in brutos ? (brutos[k] ? corpo : '') : m))
+    .replace(/\{\{\s*(nome|email|empresa|codigo)\s*\}\}/g, (_m, k: string) => escapar(brutos[k] || reserva[k] || ''))
+}
+
+/**
+ * Titulo com variaveis: sem o dado, a tag some em vez de virar "sua empresa"
+ * ("REFORMA - {{empresa}}" sem empresa = "REFORMA"), e o separador que sobra
+ * no fim ou no comeco sai junto.
+ */
+export function preencherTitulo(titulo: string, v: Parameters<typeof preencherVariaveis>[1]) {
+  const semReserva = titulo.replace(/\{\{\s*(nome|empresa)\s*\}\}/g, (m, k: string) => ((v as Record<string, string | null | undefined>)[k]?.trim() ? m : ''))
+  return preencherVariaveis(semReserva, v)
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s\-–—·:|,]+|[\s\-–—·:|,]+$/g, '')
+    .trim() || titulo
+}

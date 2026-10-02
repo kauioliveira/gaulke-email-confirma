@@ -47,6 +47,7 @@ import type {
   ConfigItem,
   RespostaItem
 } from '../../shared/types/api'
+import { preencherVariaveis, preencherTitulo } from '../../shared/utils/solicitacao'
 import { TIPOS_ITEM_VALIDOS, normalizarConfig, validarResposta, rotuloTipoItem } from '../../shared/utils/itens-solic'
 
 /**
@@ -250,19 +251,11 @@ function escapar(v: unknown) {
  * existe — e o acesso ao link ja registra o que interessa.
  */
 export function preencherEmail(html: string, v: { nome: string; email: string; empresa: string; link: string; codigo: string }) {
-  const valores: Record<string, string> = {
-    nome: escapar(v.nome),
-    // o rodape fixo do e-mail diz "enviado para {{email}}"
-    email: escapar(v.email),
-    empresa: escapar(v.empresa),
-    codigo: escapar(v.codigo),
-    link: v.link,
-    base: baseUrl()
-  }
-  return html
-    .replace(/<img src="\{\{pixel\}\}"[^>]*>/g, '')
-    .replace(/\{\{\s*#([\w]+)\s*\}\}([\s\S]*?)\{\{\s*\/\1\s*\}\}/g, (_m, k: string, corpo: string) => (valores[k] ? corpo : ''))
-    .replace(/\{\{\s*([\w]+)\s*\}\}/g, (m, k: string) => valores[k] ?? m)
+  // nome, e-mail, empresa e codigo: a mesma regra da pagina do cliente
+  // (sem empresa, "{{empresa}}" vira "sua empresa" e o bloco {{#empresa}} some)
+  const texto = preencherVariaveis(html.replace(/<img src="\{\{pixel\}\}"[^>]*>/g, ''), v, escapar)
+  const valores: Record<string, string> = { link: v.link, base: baseUrl() }
+  return texto.replace(/\{\{\s*([\w]+)\s*\}\}/g, (m, k: string) => valores[k] ?? m)
 }
 
 const RODAPE_SOLIC =
@@ -282,7 +275,9 @@ function natureza(todos: Pick<SolicItem, 'tipo'>[]): 'documentos' | 'respostas' 
 const contarItens = (n: number, nat: ReturnType<typeof natureza>) =>
   nat === 'documentos' ? (n === 1 ? 'um documento' : `${n} documentos`) : n === 1 ? 'um item' : `${n} itens`
 
-export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, todos: SolicItem[]) {
+export function montarEmail(tipo: TipoEmailSolic, original: Solicitacao, todos: SolicItem[]) {
+  // titulo com {{empresa}} (pedidos antigos guardaram o texto cru)
+  const s = { ...original, titulo: preencherTitulo(original.titulo, variaveisDe(original)) }
   // o e-mail lista o que o cliente precisa fazer; texto informativo fica na pagina
   const itens = todos.filter(i => i.tipo !== 'informativo')
   const prazo = s.prazo ? formatarData(`${s.prazo}T12:00:00${DESLOCAMENTO_SP}`) : null
@@ -975,6 +970,11 @@ export async function itemDoToken(s: Solicitacao, itemId: number) {
   return item
 }
 
+/** Valores das variaveis de texto de uma solicitacao. */
+export function variaveisDe(s: Pick<Solicitacao, 'id' | 'codigo' | 'destinatarioNome' | 'destinatarioEmail' | 'empresa'>) {
+  return { nome: s.destinatarioNome, email: s.destinatarioEmail, empresa: s.empresa, codigo: codigoSolicitacao(s) }
+}
+
 /** O que a pagina /r/<token> mostra. Nada interno: pasta, hash e IP ficam de fora. */
 export async function landingSolicitacao(s: Solicitacao): Promise<LandingSolicitacao> {
   const db = useDb()
@@ -990,8 +990,9 @@ export async function landingSolicitacao(s: Solicitacao): Promise<LandingSolicit
         .where(and(eq(solicArquivos.solicId, s.id), isNull(solicArquivos.removidoEm)))
         .orderBy(asc(solicArquivos.enviadoEm))
   return {
-    titulo: s.titulo,
-    mensagem: s.mensagem,
+    // o mesmo texto do e-mail, com {{empresa}}/{{nome}} trocados
+    titulo: preencherTitulo(s.titulo, variaveisDe(s)),
+    mensagem: s.mensagem ? preencherVariaveis(s.mensagem, variaveisDe(s)) : null,
     nome: s.destinatarioNome,
     empresa: s.empresa,
     codigo: codigoSolicitacao(s),

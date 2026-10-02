@@ -7,6 +7,7 @@ import { suprimidos } from '../../../utils/supressao'
 import { criarSolicSchema, enviarEmailSolic, registrarEventoSolic } from '../../../utils/solicitacoes'
 import { pastaDaSolicitacao } from '../../../utils/documentos'
 import { registrarContatosEmpresa } from '../../../utils/empresa-contatos'
+import { preencherTitulo } from '../../../../shared/utils/solicitacao'
 import { novoCodigoSolicitacao } from '../../../utils/solicitacoes'
 
 /**
@@ -58,7 +59,8 @@ export default defineEventHandler(async event => {
       const [s] = await tx
         .insert(solicitacoes)
         .values({
-          titulo: d.titulo,
+          // {{empresa}}/{{nome}} no titulo viram o dado de cada cliente
+          titulo: preencherTitulo(d.titulo, { nome: x.nome, email: x.email, empresa: x.empresa }).slice(0, 200),
           codigo: codigos[n]!,
           mensagem: d.mensagem,
           checklistId: d.checklistId ?? null,

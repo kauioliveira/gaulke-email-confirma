@@ -26,6 +26,7 @@ const pct = computed(() => (obrigatorios.value.length ? Math.round((feitos.value
 const tudoEntregue = computed(() => obrigatorios.value.length > 0 && feitos.value === obrigatorios.value.length)
 const recusados = computed(() => data.value?.itens.filter(i => i.status === 'recusado').length ?? 0)
 const atrasada = computed(() => !!data.value && solicitacaoAtrasada(data.value))
+const mensagemAberta = ref(false)
 
 const aceitaFoto = (i: Item) => !i.tipos.length || i.tipos.includes('imagem')
 const podeMexer = (i: Item) => !encerrada.value && i.status !== 'aprovado'
@@ -324,7 +325,20 @@ const textoWhatsapp = computed(() =>
           <UCard class="mb-4">
             <p class="text-xs uppercase tracking-wide text-muted">Solicitação {{ data.codigo }}</p>
             <h2 class="mt-1 text-lg font-semibold">{{ data.titulo }}</h2>
-            <p v-if="data.mensagem" class="mt-2 whitespace-pre-line text-sm text-default">{{ data.mensagem }}</p>
+            <!-- o texto e o mesmo do e-mail que a pessoa acabou de ler: fica recolhido,
+                 para as perguntas aparecerem logo -->
+            <div v-if="data.mensagem" class="mt-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                :aria-expanded="mensagemAberta"
+                @click="mensagemAberta = !mensagemAberta"
+              >
+                <UIcon :name="mensagemAberta ? 'i-lucide-chevron-up' : 'i-lucide-mail-open'" class="size-4" />
+                {{ mensagemAberta ? 'Recolher a mensagem' : 'Rever a mensagem do e-mail' }}
+              </button>
+              <p v-if="mensagemAberta" class="mt-2 whitespace-pre-line text-justify text-sm text-default">{{ data.mensagem }}</p>
+            </div>
             <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <span v-if="data.prazo" :class="atrasada ? 'font-medium text-error' : 'text-muted'">
                 <UIcon name="i-lucide-calendar-clock" class="mr-1 size-4 align-[-3px]" />Prazo: {{ formatarPrazo(data.prazo) }}{{ atrasada ? ' (vencido)' : '' }}
