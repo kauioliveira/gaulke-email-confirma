@@ -86,14 +86,16 @@ export function preencherVariaveis(
 }
 
 /**
- * Titulo com variaveis: sem o dado, a tag some em vez de virar "sua empresa"
- * ("REFORMA - {{empresa}}" sem empresa = "REFORMA"), e o separador que sobra
- * no fim ou no comeco sai junto.
+ * Titulo com variaveis. Sem o dado:
+ *   - tag na PONTA ("REFORMA - {{empresa}}") some, com o separador junto: "REFORMA";
+ *   - tag no MEIO da frase ("vamos preparar a {{empresa}} juntos") vira
+ *     "sua empresa", senao a frase quebraria ("preparar a juntos").
  */
 export function preencherTitulo(titulo: string, v: Parameters<typeof preencherVariaveis>[1]) {
-  const semReserva = titulo.replace(/\{\{\s*(nome|empresa)\s*\}\}/g, (m, k: string) => ((v as Record<string, string | null | undefined>)[k]?.trim() ? m : ''))
-  return preencherVariaveis(semReserva, v)
-    .replace(/\s{2,}/g, ' ')
-    .replace(/^[\s\-–—·:|,]+|[\s\-–—·:|,]+$/g, '')
-    .trim() || titulo
+  const vazio = (k: string) => !(v as Record<string, string | null | undefined>)[k]?.trim()
+  const SEP = '[\\s\\-–—·:|,]*'
+  const semPontas = titulo
+    .replace(new RegExp(`^${SEP}\\{\\{\\s*(nome|empresa)\\s*\\}\\}${SEP}`), (m, k: string) => (vazio(k) ? '' : m))
+    .replace(new RegExp(`${SEP}\\{\\{\\s*(nome|empresa)\\s*\\}\\}${SEP}$`), (m, k: string) => (vazio(k) ? '' : m))
+  return preencherVariaveis(semPontas, v).replace(/\s{2,}/g, ' ').trim() || titulo
 }
