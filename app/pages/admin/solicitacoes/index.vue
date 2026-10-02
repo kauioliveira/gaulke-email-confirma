@@ -40,7 +40,7 @@ watch([aba, minhas, buscaAtrasada], () => {
   router.replace({ query: { ...query.value, pagina: undefined } })
 })
 
-const { data, status } = await useFetch<Resposta>(api('/api/admin/solicitacoes'), { query })
+const { data, status, refresh } = await useFetch<Resposta>(api('/api/admin/solicitacoes'), { query })
 
 const ABAS = computed(() => [
   { valor: '', rotulo: 'Em andamento', n: data.value ? data.value.contadores.aberta + data.value.contadores.em_analise : null },
@@ -49,6 +49,16 @@ const ABAS = computed(() => [
   { valor: 'concluida', rotulo: 'Concluídas', n: null },
   { valor: 'cancelada', rotulo: 'Canceladas', n: null }
 ])
+
+/* excluir de vez, direto da lista (o modal confere o que o cliente ja entregou) */
+const { sessao, pode } = usePapel()
+const podeExcluir = (s: ResumoSolicitacao) => pode('supervisor') || (!!sessao.value?.usuario?.id && s.criadoPorUserId === sessao.value.usuario.id)
+const excluindo = ref<ResumoSolicitacao | null>(null)
+const modalExcluir = ref(false)
+function abrirExclusao(s: ResumoSolicitacao) {
+  excluindo.value = s
+  modalExcluir.value = true
+}
 
 const pct = (s: ResumoSolicitacao) => (s.obrigatorios ? Math.round((s.obrigatoriosEntregues / s.obrigatorios) * 100) : 0)
 </script>
@@ -95,6 +105,7 @@ const pct = (s: ResumoSolicitacao) => (s.obrigatorios ? Math.round((s.obrigatori
               <th class="px-3 py-2">Prazo</th>
               <th class="px-3 py-2">Situação</th>
               <th class="px-3 py-2">Pedido por</th>
+              <th class="w-10 px-3 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -138,6 +149,11 @@ const pct = (s: ResumoSolicitacao) => (s.obrigatorios ? Math.round((s.obrigatori
                 <UBadge :color="COR_STATUS_SOLIC[s.status]" variant="subtle">{{ ROTULO_STATUS_SOLIC[s.status] }}</UBadge>
               </td>
               <td class="max-w-[160px] truncate px-3 py-2 text-muted">{{ s.criadoPorNome || '—' }}</td>
+              <td class="px-2 py-2 text-right" @click.stop>
+                <UTooltip v-if="podeExcluir(s)" text="Excluir definitivamente">
+                  <UButton icon="i-lucide-trash-2" color="error" variant="ghost" size="xs" :aria-label="`Excluir ${s.codigo}`" @click="abrirExclusao(s)" />
+                </UTooltip>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -153,5 +169,12 @@ const pct = (s: ResumoSolicitacao) => (s.obrigatorios ? Math.round((s.obrigatori
         </div>
       </template>
     </UCard>
+
+    <ModalExcluirSolicitacao
+      v-model:open="modalExcluir"
+      :solicitacao="excluindo"
+      @excluida="refresh()"
+      @cancelar="excluindo && navigateTo(`/admin/solicitacoes/${excluindo.id}`)"
+    />
   </div>
 </template>

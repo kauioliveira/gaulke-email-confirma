@@ -735,6 +735,7 @@ export interface ResumoSolicitacao {
   prazo: string | null
   grupo: string | null
   criadoPorNome: string | null
+  criadoPorUserId: number | null
   createdAt: string
   enviadoEm: string | null
   envioErro: string | null
@@ -761,7 +762,6 @@ export interface EventoSolicitacao {
 }
 
 export interface DetalheSolicitacao extends ResumoSolicitacao {
-  criadoPorUserId: number | null
   mensagem: string | null
   contaId: number | null
   contaNome: string | null

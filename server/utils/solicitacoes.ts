@@ -270,12 +270,6 @@ const RODAPE_SOLIC =
 
 export type TipoEmailSolic = 'pedido' | 'lembrete' | 'pendencias' | 'concluida'
 
-function rotuloItem(i: SolicItem) {
-  const formato =
-    i.tipo !== 'documento' ? ` — ${rotuloTipoItem(i.tipo).toLowerCase()}` : i.tipos.length ? ` — ${descreverFamilias(i.tipos)}` : ''
-  return `${i.titulo}${i.obrigatorio ? '' : ' (opcional)'}${formato}`
-}
-
 /** O que a solicitacao pede: so arquivos, so respostas ou os dois — muda o texto dos e-mails. */
 function natureza(todos: Pick<SolicItem, 'tipo'>[]): 'documentos' | 'respostas' | 'misto' {
   const itens = todos.filter(i => i.tipo !== 'informativo')
@@ -306,26 +300,25 @@ export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, todos: SolicIt
       tipo: 'texto',
       texto: s.mensagem || `A Contábil Gaulke precisa de ${oQue}{{#empresa}} de {{empresa}}{{/empresa}} para dar andamento a: ${s.titulo}.`
     })
+    // a lista do que foi pedido fica na pagina do link, nao no e-mail: o
+    // e-mail so convida a clicar (titulos longos viravam um paredao de texto)
     blocos.push({
       id: 'o-que',
       tipo: 'texto',
       texto: {
-        documentos: 'Pelo botão abaixo você envia cada um deles, direto do computador ou tirando uma foto com o celular:',
-        respostas: 'Pelo botão abaixo você responde cada item, direto no navegador:',
-        misto: 'Pelo botão abaixo você responde as perguntas e envia os documentos, do computador ou tirando uma foto com o celular:'
-      }[nat],
-      alinhamento: 'esquerda'
+        documentos: 'Pelo botão abaixo você vê o que precisamos e envia cada documento, direto do computador ou tirando uma foto com o celular.',
+        respostas: 'Pelo botão abaixo você vê as perguntas e responde direto no navegador.',
+        misto: 'Pelo botão abaixo você vê tudo o que precisamos: responde as perguntas e envia os documentos, do computador ou tirando uma foto com o celular.'
+      }[nat]
     })
-    blocos.push({ id: 'itens', tipo: 'lista', itens: itens.map(rotuloItem), alinhamento: 'esquerda' })
   } else if (tipo === 'lembrete') {
     const faltam = itens.filter(i => i.obrigatorio && (i.status === 'pendente' || i.status === 'recusado'))
     assunto = `Lembrete: ainda faltam ${nat === 'documentos' ? 'documentos' : 'itens'} — ${s.titulo}`
     blocos.push({
       id: 'intro',
       tipo: 'texto',
-      texto: `Ainda não recebemos ${contarItens(faltam.length, nat)} da solicitação "${s.titulo}":`
+      texto: `Ainda não recebemos ${contarItens(faltam.length, nat)} da solicitação "${s.titulo}". Pelo botão abaixo você vê o que falta.`
     })
-    blocos.push({ id: 'itens', tipo: 'lista', itens: faltam.map(rotuloItem), alinhamento: 'esquerda' })
   } else if (tipo === 'pendencias') {
     const recusados = itens.filter(i => i.status === 'recusado')
     assunto = `Precisamos de um novo envio — ${s.titulo}`
@@ -387,7 +380,7 @@ export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, todos: SolicIt
     '',
     assunto,
     '',
-    ...(tipo === 'concluida' ? [] : itens.filter(i => tipo === 'pedido' || i.status === 'recusado' || i.status === 'pendente').map(i => `- ${rotuloItem(i)}`)),
+    ...(tipo === 'pendencias' ? itens.filter(i => i.status === 'recusado').map(i => `- ${i.titulo}: ${i.motivo || 'envie novamente'}`) : []),
     '',
     `Acesse: ${link}`,
     prazo && tipo !== 'concluida' ? `Prazo: ${prazo}` : '',
@@ -853,6 +846,7 @@ export function resumoDaLinha(s: Solicitacao, c: Contagens): ResumoSolicitacao {
     prazo: s.prazo,
     grupo: s.grupo,
     criadoPorNome: s.criadoPorNome,
+    criadoPorUserId: s.criadoPorUserId,
     createdAt: s.createdAt.toISOString(),
     enviadoEm: iso(s.enviadoEm),
     envioErro: s.envioErro,
@@ -899,7 +893,6 @@ export async function detalheSolicitacao(id: number): Promise<DetalheSolicitacao
   const iso = (d: Date | null) => (d ? d.toISOString() : null)
   return {
     ...resumoDaLinha(s, linha.c as Contagens),
-    criadoPorUserId: s.criadoPorUserId,
     mensagem: s.mensagem,
     contaId: s.contaId,
     contaNome: s.contaNome,

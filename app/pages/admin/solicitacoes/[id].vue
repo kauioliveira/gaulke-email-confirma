@@ -28,6 +28,11 @@ onBeforeUnmount(() => clearInterval(timer))
 const encerrada = computed(() => s.value?.status === 'concluida' || s.value?.status === 'cancelada')
 const souQuemPediu = computed(() => !!sessao.value?.usuario?.id && s.value?.criadoPorUserId === sessao.value.usuario.id)
 const podeCancelar = computed(() => souQuemPediu.value || pode('supervisor'))
+// excluir de vez: mesma regra de quem cancela (o servidor ainda exige supervisor se o cliente ja entregou)
+const modalExcluir = ref(false)
+async function aposExcluir() {
+  await navigateTo('/admin/solicitacoes')
+}
 
 const ocupado = ref<string | null>(null)
 async function acao(chave: string, fn: () => Promise<unknown>, sucesso?: string) {
@@ -263,6 +268,9 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
         </UDropdownMenu>
         <UButton v-if="!encerrada" label="Concluir" icon="i-lucide-badge-check" color="success" variant="soft" @click="obsConclusao = ''; avisarNaConclusao = s.avisarConclusao; modalConcluir = true" />
         <UButton v-if="encerrada && (s.status === 'concluida' || podeCancelar)" label="Reabrir" icon="i-lucide-rotate-ccw" color="neutral" variant="outline" :loading="ocupado === 'reabrir'" @click="reabrir" />
+        <UTooltip v-if="podeCancelar" text="Excluir definitivamente">
+          <UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Excluir definitivamente" @click="modalExcluir = true" />
+        </UTooltip>
       </div>
     </div>
 
@@ -652,6 +660,13 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
         </div>
       </template>
     </UModal>
+
+    <ModalExcluirSolicitacao
+      v-model:open="modalExcluir"
+      :solicitacao="s ?? null"
+      @excluida="aposExcluir"
+      @cancelar="motivoCancelar = ''; modalCancelar = true"
+    />
 
     <!-- cancelar -->
     <UModal v-model:open="modalCancelar" title="Cancelar a solicitação" description="O link do cliente passa a mostrar “solicitação encerrada”. O que já chegou fica na pasta.">

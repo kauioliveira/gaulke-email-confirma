@@ -120,6 +120,36 @@ const envioValido = computed(() => titulo.value.trim().length >= 3 && !respostaI
 const podeAvancar = computed(() => [true, itensValidos.value, destinatariosValidos.value.length > 0 && !destinatariosComErro.value, envioValido.value][passo.value])
 const alcancavel = (n: number) => n === 0 || (n <= 1 ? true : n === 2 ? itensValidos.value : itensValidos.value && destinatariosValidos.value.length > 0)
 
+/* ---------- envio de teste ---------- */
+// vai para quem esta montando, por padrao; da para trocar
+const emailTeste = ref('')
+watch(meuEmail, v => { if (!emailTeste.value && v) emailTeste.value = v }, { immediate: true })
+const enviandoTeste = ref(false)
+async function enviarTeste() {
+  enviandoTeste.value = true
+  try {
+    const d = destinatariosValidos.value[0]
+    await $fetch(api('/api/admin/solicitacoes/teste'), {
+      method: 'POST',
+      body: {
+        para: emailTeste.value,
+        titulo: titulo.value,
+        mensagem: mensagem.value || null,
+        prazo: prazo.value || null,
+        contaId: contaId.value || null,
+        responderPara: responderPara.value,
+        itens: itens.value,
+        destinatario: d ? { nome: d.nome || null, empresa: d.empresa || null } : null
+      }
+    })
+    toast.add({ title: `Teste enviado para ${emailTeste.value}`, description: 'Confira a caixa de entrada (e o spam). O link do teste não abre nenhuma solicitação.', color: 'success', icon: 'i-lucide-mail-check' })
+  } catch (e: any) {
+    toast.add({ title: 'Não foi possível enviar o teste', description: e?.data?.statusMessage || e?.statusMessage, color: 'error' })
+  } finally {
+    enviandoTeste.value = false
+  }
+}
+
 /* ---------- prévia e confirmação ---------- */
 const previa = ref<{ assunto: string; html: string } | null>(null)
 const carregandoPrevia = ref(false)
@@ -329,6 +359,20 @@ async function enviar() {
           :color="respostaInvalida && respostaOutro ? 'error' : undefined"
         />
         <UButton label="Ver o e-mail" icon="i-lucide-eye" color="neutral" variant="outline" block :loading="carregandoPrevia" @click="verPrevia" />
+        <UFormField label="Enviar um teste" help="Chega como o cliente vai receber, com [TESTE] no assunto, pelo canal escolhido acima.">
+          <div class="flex gap-2">
+            <UInput
+              v-model="emailTeste"
+              type="email"
+              icon="i-lucide-at-sign"
+              placeholder="seu@contabilgaulke.com.br"
+              class="min-w-0 flex-1"
+              :color="emailTeste && !emailValido(emailTeste) ? 'error' : undefined"
+              @keydown.enter.prevent="emailValido(emailTeste) && enviarTeste()"
+            />
+            <UButton label="Enviar teste" icon="i-lucide-send" color="neutral" variant="outline" :loading="enviandoTeste" :disabled="!emailValido(emailTeste)" @click="enviarTeste" />
+          </div>
+        </UFormField>
       </div>
     </section>
 

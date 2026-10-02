@@ -368,7 +368,8 @@ const { data: pessoasData, status: carregandoPessoas, execute: buscarPessoas } =
 })
 watch(origem, o => { if (o === 'sistema' && !pessoasData.value) buscarPessoas() }, { immediate: true })
 const pessoas = computed(() => pessoasData.value?.pessoas || [])
-const linhaPessoa = (p: Pessoa) => ({ email: p.email, nome: p.nome, empresa: p.detalhe || '', documento: p.documento })
+// "detalhe" e setor · cargo (equipe) ou o codigo do cliente: nao e empresa
+const linhaPessoa = (p: Pessoa) => ({ email: p.email, nome: p.nome, empresa: '', documento: p.documento })
 function adicionarPessoa(p: Pessoa) {
   adicionar([linhaPessoa(p)], p.origem === 'equipe' ? 'equipe' : 'cliente')
 }
