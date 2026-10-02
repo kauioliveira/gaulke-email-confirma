@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { iconeDoArquivo, TIPOS_SOLICITACAO, descreverFamilias } from '~~/shared/types/tipos-arquivo'
+import { rotuloTipoItem, iconeTipoItem, descreverConfig, novoItemSolic, ehInformativo, classesInformativo } from '~~/shared/utils/itens-solic'
 
 definePageMeta({ layout: 'admin' })
 
@@ -129,7 +130,7 @@ const incluindo = ref<ItemModeloChecklist[] | null>(null)
 async function incluirItem() {
   const item = incluindo.value?.[0]
   if (!item) return
-  const ok = await acao('incluir', () => $fetch(api(`/api/admin/solicitacoes/${id}/itens`), { method: 'POST', body: item }), 'Documento incluído')
+  const ok = await acao('incluir', () => $fetch(api(`/api/admin/solicitacoes/${id}/itens`), { method: 'POST', body: item }), 'Item incluído')
   if (ok) incluindo.value = null
 }
 
@@ -181,6 +182,16 @@ const documentoFormatado = computed(() => {
   return d
 })
 const temArquivoLiberado = computed(() => s.value?.itens.some(i => i.arquivos.some(a => !a.removidoEm && liberado(a))) ?? false)
+const temPergunta = computed(() => s.value?.itens.some(i => i.tipo !== 'documento' && i.tipo !== 'informativo') ?? false)
+const temResposta = computed(() => s.value?.itens.some(i => i.tipo !== 'documento' && i.resposta) ?? false)
+const menuCsv = computed(() => [
+  [
+    { label: 'Deste cliente', icon: 'i-lucide-user', to: api(`/api/admin/solicitacoes/${id}/respostas.csv`), external: true },
+    ...(s.value?.grupo
+      ? [{ label: 'De todos os clientes do envio', icon: 'i-lucide-users', to: api(`/api/admin/solicitacoes/${id}/respostas.csv?grupo=1`), external: true }]
+      : [])
+  ]
+])
 
 const ICONE_EVENTO_SOLIC: Record<string, string> = {
   resposta_email: 'i-lucide-reply',
@@ -196,6 +207,8 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
   email_corrigido: 'i-lucide-at-sign',
   acesso: 'i-lucide-eye',
   arquivo_recebido: 'i-lucide-file-up',
+  resposta: 'i-lucide-message-square-text',
+  resposta_apagada: 'i-lucide-message-square-x',
   arquivo_removido: 'i-lucide-file-minus',
   arquivo_infectado: 'i-lucide-shield-x',
   nao_possui: 'i-lucide-circle-slash',
@@ -241,10 +254,13 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
           icon="i-lucide-folder-down"
           color="neutral"
           variant="outline"
-          :disabled="!temArquivoLiberado"
+          :disabled="!temArquivoLiberado && !temResposta"
           :to="api(`/api/admin/solicitacoes/${id}/zip`)"
           external
         />
+        <UDropdownMenu v-if="temPergunta" :items="menuCsv">
+          <UButton label="Respostas (CSV)" icon="i-lucide-sheet" trailing-icon="i-lucide-chevron-down" color="neutral" variant="outline" />
+        </UDropdownMenu>
         <UButton v-if="!encerrada" label="Concluir" icon="i-lucide-badge-check" color="success" variant="soft" @click="obsConclusao = ''; avisarNaConclusao = s.avisarConclusao; modalConcluir = true" />
         <UButton v-if="encerrada && (s.status === 'concluida' || podeCancelar)" label="Reabrir" icon="i-lucide-rotate-ccw" color="neutral" variant="outline" :loading="ocupado === 'reabrir'" @click="reabrir" />
       </div>
@@ -312,111 +328,147 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
           </div>
         </UCard>
 
-        <UCard v-for="item in s.itens" :key="item.id" :ui="{ body: 'space-y-3' }">
-          <div class="flex flex-wrap items-start gap-3">
-            <UIcon :name="ICONE_STATUS_ITEM[item.status]" class="mt-0.5 size-5 shrink-0" :class="COR_ICONE_ITEM[item.status]" />
-            <div class="min-w-0 flex-1">
-              <p class="font-medium">
-                <span class="text-muted">{{ item.ordem }}.</span> {{ item.titulo }}
-                <UBadge v-if="!item.obrigatorio" color="neutral" variant="outline" size="sm" class="ml-1">opcional</UBadge>
-              </p>
-              <p class="text-xs text-muted">
-                {{ descreverFamilias(item.tipos) }} · até {{ item.maxArquivos }} arquivo(s)<template v-if="item.modeloNome"> · com modelo</template>
-                <template v-if="item.instrucao"> · {{ item.instrucao }}</template>
-              </p>
-            </div>
-            <UBadge :color="COR_STATUS_ITEM[item.status]" variant="subtle">
-              {{ item.status === 'nao_possui' && item.analisadoEm ? 'Não possui (aceito)' : ROTULO_STATUS_ITEM[item.status] }}
-            </UBadge>
-          </div>
-
-          <!-- "não possuo" e recusa -->
-          <blockquote v-if="item.status === 'nao_possui'" class="rounded-md border-l-4 border-warning bg-warning/10 px-3 py-2 text-sm">
-            <span class="text-xs font-medium uppercase text-muted">O cliente diz que não possui</span>
-            <p>{{ item.motivo || 'Sem justificativa (item opcional).' }}</p>
-          </blockquote>
-          <div v-if="item.status === 'recusado'" class="rounded-md border-l-4 border-error bg-error/10 px-3 py-2 text-sm">
-            <span class="text-xs font-medium uppercase text-muted">Recusado por {{ item.analisadoPorNome }} em {{ formatarDataHora(item.analisadoEm) }}</span>
-            <p>{{ item.motivo }}</p>
-            <p class="mt-1 text-xs" :class="item.recusaAvisadaEm ? 'text-muted' : 'font-medium text-warning'">
-              {{ item.recusaAvisadaEm ? `Cliente avisado em ${formatarDataHora(item.recusaAvisadaEm)}` : 'Cliente ainda não avisado' }}
+        <template v-for="item in s.itens" :key="item.id">
+          <!-- texto so para leitura: o cliente le, ninguem analisa -->
+          <div v-if="ehInformativo(item)" class="rounded-lg border border-dashed border-default px-4 py-3">
+            <p class="mb-1 text-xs text-muted">
+              <UIcon name="i-lucide-text" class="align-[-2px]" /> <span class="font-medium">{{ item.ordem }}.</span> Texto para o cliente ler<template v-if="item.titulo"> · {{ item.titulo }}</template>
             </p>
+            <div class="text-sm" :class="classesInformativo(item.config)">{{ item.config.texto }}</div>
           </div>
-
-          <!-- arquivos -->
-          <ul v-if="item.arquivos.length" class="divide-y divide-default rounded-md border border-default">
-            <li
-              v-for="a in item.arquivos"
-              :key="a.id"
-              class="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
-              :class="{ 'opacity-50': a.removidoEm }"
-            >
-              <UIcon :name="iconeDoArquivo(a.nome, TIPOS_SOLICITACAO)" class="size-5 shrink-0 text-primary" />
+          <UCard v-else :ui="{ body: 'space-y-3' }">
+            <div class="flex flex-wrap items-start gap-3">
+              <UIcon :name="ICONE_STATUS_ITEM[item.status]" class="mt-0.5 size-5 shrink-0" :class="COR_ICONE_ITEM[item.status]" />
               <div class="min-w-0 flex-1">
-                <a
-                  v-if="!a.removidoEm && liberado(a)"
-                  :href="arquivoUrl(a, abreNoNavegador(a.nome))"
-                  target="_blank"
-                  rel="noopener"
-                  class="block truncate font-medium hover:text-primary"
-                >{{ a.nome }}</a>
-                <p v-else class="truncate" :class="{ 'line-through': a.removidoEm }">{{ a.nome }}</p>
+                <p class="font-medium">
+                  <span class="text-muted">{{ item.ordem }}.</span> {{ item.titulo }}
+                  <UBadge v-if="!item.obrigatorio" color="neutral" variant="outline" size="sm" class="ml-1">opcional</UBadge>
+                </p>
                 <p class="text-xs text-muted">
-                  {{ tamanho(a.tamanho) }} · {{ formatarDataHora(a.enviadoEm) }}
-                  <template v-if="a.removidoEm"> · removido em {{ formatarDataHora(a.removidoEm) }}</template>
+                  <template v-if="item.tipo === 'documento'">
+                    {{ descreverFamilias(item.tipos) }} · até {{ item.maxArquivos }} arquivo(s)<template v-if="item.modeloNome"> · com modelo</template>
+                  </template>
+                  <template v-else>
+                    <UIcon :name="iconeTipoItem(item.tipo)" class="align-[-2px]" /> {{ rotuloTipoItem(item.tipo) }}<template v-if="descreverConfig(item.tipo, item.config)"> · {{ descreverConfig(item.tipo, item.config) }}</template>
+                    <template v-if="item.config.conferir === false"> · aprovação automática</template>
+                  </template>
+                  <template v-if="item.instrucao"> · {{ item.instrucao }}</template>
                 </p>
               </div>
-              <UTooltip :text="a.antivirusMsg || AV[a.antivirus].rotulo">
-                <UBadge :color="AV[a.antivirus].cor" variant="subtle" :icon="AV[a.antivirus].icone" size="sm">{{ AV[a.antivirus].rotulo }}</UBadge>
-              </UTooltip>
+              <UBadge :color="COR_STATUS_ITEM[item.status]" variant="subtle">
+                {{ item.status === 'nao_possui' && item.analisadoEm ? 'Não possui (aceito)' : ROTULO_STATUS_ITEM[item.status] }}
+              </UBadge>
+            </div>
+
+            <!-- "não possuo" e recusa -->
+            <blockquote v-if="item.status === 'nao_possui'" class="rounded-md border-l-4 border-warning bg-warning/10 px-3 py-2 text-sm">
+              <span class="text-xs font-medium uppercase text-muted">O cliente diz que não possui</span>
+              <p>{{ item.motivo || 'Sem justificativa (item opcional).' }}</p>
+            </blockquote>
+            <div v-if="item.status === 'recusado'" class="rounded-md border-l-4 border-error bg-error/10 px-3 py-2 text-sm">
+              <span class="text-xs font-medium uppercase text-muted">Recusado por {{ item.analisadoPorNome }} em {{ formatarDataHora(item.analisadoEm) }}</span>
+              <p>{{ item.motivo }}</p>
+              <p class="mt-1 text-xs" :class="item.recusaAvisadaEm ? 'text-muted' : 'font-medium text-warning'">
+                {{ item.recusaAvisadaEm ? `Cliente avisado em ${formatarDataHora(item.recusaAvisadaEm)}` : 'Cliente ainda não avisado' }}
+              </p>
+            </div>
+
+            <!-- resposta -->
+            <template v-if="item.tipo !== 'documento'">
+              <div v-if="item.resposta" class="rounded-md border border-default bg-elevated/40 px-3 py-2 text-sm">
+                <template v-if="item.tipo === 'declaracao'">
+                  <p class="whitespace-pre-wrap text-muted">{{ item.config.texto }}</p>
+                  <p class="mt-2 font-medium text-success"><UIcon name="i-lucide-circle-check" class="mr-1 align-[-2px]" />Li e aceito a declaração</p>
+                  <p v-if="item.resposta.declaracaoSha256" class="mt-1 break-all font-mono text-[11px] text-dimmed">SHA-256 do texto: {{ item.resposta.declaracaoSha256 }}</p>
+                </template>
+                <p v-else class="whitespace-pre-wrap break-words">{{ item.resposta.exibicao }}</p>
+                <p class="mt-1 text-xs text-muted">
+                  Respondido em {{ formatarDataHora(item.respondidoEm) }}<template v-if="item.respostaIp"> · IP {{ item.respostaIp }}</template>
+                </p>
+              </div>
+              <p v-else-if="item.status === 'pendente' || item.status === 'recusado'" class="text-sm text-muted">Sem resposta ainda.</p>
+            </template>
+
+            <!-- arquivos -->
+            <ul v-if="item.arquivos.length" class="divide-y divide-default rounded-md border border-default">
+              <li
+                v-for="a in item.arquivos"
+                :key="a.id"
+                class="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
+                :class="{ 'opacity-50': a.removidoEm }"
+              >
+                <UIcon :name="iconeDoArquivo(a.nome, TIPOS_SOLICITACAO)" class="size-5 shrink-0 text-primary" />
+                <div class="min-w-0 flex-1">
+                  <a
+                    v-if="!a.removidoEm && liberado(a)"
+                    :href="arquivoUrl(a, abreNoNavegador(a.nome))"
+                    target="_blank"
+                    rel="noopener"
+                    class="block truncate font-medium hover:text-primary"
+                  >{{ a.nome }}</a>
+                  <p v-else class="truncate" :class="{ 'line-through': a.removidoEm }">{{ a.nome }}</p>
+                  <p class="text-xs text-muted">
+                    {{ tamanho(a.tamanho) }} · {{ formatarDataHora(a.enviadoEm) }}
+                    <template v-if="a.removidoEm"> · removido em {{ formatarDataHora(a.removidoEm) }}</template>
+                  </p>
+                </div>
+                <UTooltip :text="a.antivirusMsg || AV[a.antivirus].rotulo">
+                  <UBadge :color="AV[a.antivirus].cor" variant="subtle" :icon="AV[a.antivirus].icone" size="sm">{{ AV[a.antivirus].rotulo }}</UBadge>
+                </UTooltip>
+                <UButton
+                  v-if="!a.removidoEm && liberado(a)"
+                  icon="i-lucide-download"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Baixar"
+                  :to="arquivoUrl(a)"
+                  external
+                />
+              </li>
+            </ul>
+            <p v-else-if="item.status === 'pendente' && item.tipo === 'documento'" class="text-sm text-muted">Nada enviado ainda.</p>
+
+            <!-- ações -->
+            <div v-if="!encerrada" class="flex flex-wrap justify-end gap-2">
+              <template
+                v-if="
+                  item.status === 'enviado' ||
+                  (item.status === 'recusado' && (item.tipo === 'documento' ? item.arquivos.some(a => !a.removidoEm && liberado(a)) : !!item.resposta))
+                "
+              >
+                <UButton label="Recusar" icon="i-lucide-x" color="error" variant="outline" size="sm" @click="abrirRecusa(item)" />
+                <UButton label="Aprovar" icon="i-lucide-check" color="success" size="sm" :loading="ocupado === `aprovar-${item.id}`" @click="analisar(item, 'aprovar')" />
+              </template>
+              <template v-else-if="item.status === 'nao_possui' && !item.analisadoEm">
+                <UButton label="Precisamos do documento" icon="i-lucide-x" color="error" variant="outline" size="sm" @click="abrirRecusa(item)" />
+                <UButton label="Aceitar" icon="i-lucide-check" color="success" size="sm" :loading="ocupado === `aceitar-${item.id}`" @click="analisar(item, 'aceitar')" />
+              </template>
               <UButton
-                v-if="!a.removidoEm && liberado(a)"
-                icon="i-lucide-download"
+                v-if="item.status === 'aprovado' || item.status === 'recusado' || (item.status === 'nao_possui' && item.analisadoEm)"
+                label="Desfazer análise"
+                icon="i-lucide-undo-2"
                 color="neutral"
                 variant="ghost"
                 size="sm"
-                aria-label="Baixar"
-                :to="arquivoUrl(a)"
-                external
+                :loading="ocupado === `desfazer-${item.id}`"
+                @click="analisar(item, 'desfazer')"
               />
-            </li>
-          </ul>
-          <p v-else-if="item.status === 'pendente'" class="text-sm text-muted">Nada enviado ainda.</p>
-
-          <!-- ações -->
-          <div v-if="!encerrada" class="flex flex-wrap justify-end gap-2">
-            <template v-if="item.status === 'enviado' || (item.status === 'recusado' && item.arquivos.some(a => !a.removidoEm && liberado(a)))">
-              <UButton label="Recusar" icon="i-lucide-x" color="error" variant="outline" size="sm" @click="abrirRecusa(item)" />
-              <UButton label="Aprovar" icon="i-lucide-check" color="success" size="sm" :loading="ocupado === `aprovar-${item.id}`" @click="analisar(item, 'aprovar')" />
-            </template>
-            <template v-else-if="item.status === 'nao_possui' && !item.analisadoEm">
-              <UButton label="Precisamos do documento" icon="i-lucide-x" color="error" variant="outline" size="sm" @click="abrirRecusa(item)" />
-              <UButton label="Aceitar" icon="i-lucide-check" color="success" size="sm" :loading="ocupado === `aceitar-${item.id}`" @click="analisar(item, 'aceitar')" />
-            </template>
-            <UButton
-              v-if="item.status === 'aprovado' || item.status === 'recusado' || (item.status === 'nao_possui' && item.analisadoEm)"
-              label="Desfazer análise"
-              icon="i-lucide-undo-2"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :loading="ocupado === `desfazer-${item.id}`"
-              @click="analisar(item, 'desfazer')"
-            />
-          </div>
-          <p v-if="item.analisadoPorNome && item.status !== 'recusado'" class="text-right text-xs text-muted">
-            Analisado por {{ item.analisadoPorNome }} em {{ formatarDataHora(item.analisadoEm) }}
-          </p>
-        </UCard>
+            </div>
+            <p v-if="item.analisadoPorNome && item.status !== 'recusado'" class="text-right text-xs text-muted">
+              Analisado por {{ item.analisadoPorNome }} em {{ formatarDataHora(item.analisadoEm) }}
+            </p>
+          </UCard>
+        </template>
 
         <UButton
           v-if="s.status !== 'cancelada'"
-          label="Pedir mais um documento"
+          label="Pedir mais um item"
           icon="i-lucide-plus"
           color="neutral"
           variant="outline"
           block
-          @click="incluindo = [{ titulo: '', instrucao: null, obrigatorio: true, tipos: ['PDF', 'imagem'], maxArquivos: 5, modeloPath: null, modeloNome: null }]"
+          @click="incluindo = [novoItemSolic()]"
         />
       </div>
 
@@ -543,10 +595,10 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
       </template>
     </UModal>
 
-    <!-- incluir documento -->
+    <!-- incluir item -->
     <UModal
       :open="!!incluindo"
-      title="Pedir mais um documento"
+      title="Pedir mais um item"
       description="O cliente vê o item novo no mesmo link. Para avisá-lo por e-mail, use “Enviar lembrete”."
       :ui="{ content: 'sm:max-w-2xl' }"
       @update:open="v => { if (!v) incluindo = null }"
@@ -560,7 +612,7 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
           <UButton
             label="Incluir"
             icon="i-lucide-plus"
-            :disabled="incluindo?.length !== 1 || !incluindo[0]?.titulo.trim()"
+            :disabled="incluindo?.length !== 1 || !itemCompleto(incluindo[0]!)"
             :loading="ocupado === 'incluir'"
             @click="incluirItem"
           />

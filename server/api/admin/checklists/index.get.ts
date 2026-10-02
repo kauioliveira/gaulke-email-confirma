@@ -41,6 +41,8 @@ export default defineEventHandler(async event => {
     itens: itens
       .filter(i => i.checklistId === m.id)
       .map(i => ({
+        tipo: i.tipo,
+        config: i.config,
         titulo: i.titulo,
         instrucao: i.instrucao,
         obrigatorio: i.obrigatorio,

@@ -9,6 +9,7 @@ import { renderizarBlocos } from '../../../utils/blocos'
 import { blocosSchema, faltaBotaoDeAcesso, MSG_BOTAO_OBRIGATORIO } from '../../../utils/blocos-schema'
 import { auditar } from '../../../utils/auditoria'
 import { suprimidos } from '../../../utils/supressao'
+import { registrarContatosEmpresa } from '../../../utils/empresa-contatos'
 
 const schema = z.object({
   nome: z.string().min(1).max(200),
@@ -275,6 +276,8 @@ export default defineEventHandler(async event => {
     await db.update(batches).set({ total: inseridos.length }).where(eq(batches.id, lote!.id))
   }
   await Promise.all(inseridos.map(r => registrarEvento(r.id, 'enfileirado')))
+  // aprende qual e-mail recebe por CPF/CNPJ (sugestao na busca de empresa)
+  await registrarContatosEmpresa(linhas, 'lote')
 
   await auditar(event, 'lote.criar', {
     entidade: 'lote',

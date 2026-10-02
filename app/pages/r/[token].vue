@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { acceptDe, tiposDoItem, tipoPelaExtensao, descreverFamilias, iconeDoArquivo, TIPOS_SOLICITACAO } from '~~/shared/types/tipos-arquivo'
+import { validarResposta, respostaParaEntrada, ehInformativo, classesInformativo } from '~~/shared/utils/itens-solic'
 
 /**
- * Página do CLIENTE para enviar os documentos pedidos. Sempre clara (a marca
- * tem cor fixa), pensada primeiro para o celular: um cartão por documento,
- * botão de câmera, e cada arquivo sobe sozinho com a sua barra de progresso.
+ * Página do CLIENTE para enviar os documentos e responder o que foi pedido.
+ * Sempre clara (a marca tem cor fixa), pensada primeiro para o celular: um
+ * cartão por item, botão de câmera, cada arquivo sobe sozinho com a sua barra
+ * de progresso e as respostas se salvam enquanto a pessoa digita.
  */
 definePageMeta({ layout: false, colorMode: 'light' })
 
@@ -13,7 +15,7 @@ const toast = useToast()
 const token = String(route.params.token)
 
 const { data, error, refresh } = await useFetch<LandingSolicitacao>(api(`/api/r/${token}`))
-useHead({ title: () => (data.value ? `${data.value.titulo} — Contábil Gaulke` : 'Envio de documentos — Contábil Gaulke') })
+useHead({ title: () => (data.value ? `${data.value.titulo} — Contábil Gaulke` : 'Solicitação — Contábil Gaulke') })
 
 type Item = LandingSolicitacao['itens'][number]
 const encerrada = computed(() => data.value?.status === 'concluida' || data.value?.status === 'cancelada')
@@ -27,7 +29,123 @@ const atrasada = computed(() => !!data.value && solicitacaoAtrasada(data.value))
 
 const aceitaFoto = (i: Item) => !i.tipos.length || i.tipos.includes('imagem')
 const podeMexer = (i: Item) => !encerrada.value && i.status !== 'aprovado'
+const ehDocumento = (i: Item) => i.tipo === 'documento'
+// resposta aprovada automaticamente continua editavel; conferida pela equipe, nao
+const podeResponder = (i: Item) => !encerrada.value && (i.status !== 'aprovado' || i.config.conferir === false)
+const soDocumentos = computed(() => data.value?.itens.filter(i => !ehInformativo(i)).every(ehDocumento) ?? true)
+// numeracao so dos itens que pedem algo (o texto informativo nao conta)
+const numero = computed(() => new Map((data.value?.itens ?? []).filter(i => !ehInformativo(i)).map((i, n) => [i.id, n + 1])))
 const ativos = (i: Item) => i.arquivos.length
+
+/* ---------- respostas (salvam sozinhas) ---------- */
+// o que a pessoa esta digitando fica aqui, fora de `data`: um refresh depois
+// de um upload nao pode apagar o que ainda nao foi salvo
+const rascunhos = reactive<Record<number, unknown>>({})
+const pendentes = new Set<number>()
+const errosResp = reactive<Record<number, string | null>>({})
+const salvoEm = reactive<Record<number, Date | null>>({})
+const salvandoResp = ref(false)
+let espera: ReturnType<typeof setTimeout> | null = null
+let seq = 0
+
+watch(
+  () => data.value?.itens,
+  itens => {
+    for (const i of itens ?? []) {
+      if (ehDocumento(i) || ehInformativo(i) || i.id in rascunhos) continue
+      rascunhos[i.id] = respostaParaEntrada(i.tipo, i.resposta)
+      salvoEm[i.id] = i.respondidoEm ? new Date(i.respondidoEm) : null
+    }
+  },
+  { immediate: true }
+)
+
+function mudou(item: Item, valor: unknown) {
+  rascunhos[item.id] = valor
+  pendentes.add(item.id)
+  if (espera) clearTimeout(espera)
+  espera = setTimeout(() => salvarRespostas(), 1500)
+}
+
+async function salvarRespostas(o: { aoSair?: boolean } = {}) {
+  if (espera) clearTimeout(espera)
+  espera = null
+  if (!pendentes.size || !data.value) return
+  const respostas: { itemId: number; valor: unknown }[] = []
+  for (const id of [...pendentes]) {
+    const item = data.value.itens.find(i => i.id === id)
+    if (!item) continue
+    // a mesma regra do servidor: o que nao passa fica so na tela, com o aviso
+    const v = validarResposta(item.tipo, item.config, rascunhos[id])
+    errosResp[id] = v.ok ? null : v.erro
+    if (v.ok) respostas.push({ itemId: id, valor: rascunhos[id] })
+  }
+  pendentes.clear()
+  if (!respostas.length) return
+
+  // fechando a aba: keepalive deixa o pedido terminar depois da pagina sair
+  if (o.aoSair) {
+    try {
+      fetch(api(`/api/r/${token}/respostas`), {
+        method: 'PUT',
+        keepalive: true,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ respostas })
+      })
+    } catch {}
+    return
+  }
+
+  const meu = ++seq
+  salvandoResp.value = true
+  try {
+    const r = await $fetch<{ erros: Record<number, string>; itens: Item[]; status: StatusSolicitacao }>(api(`/api/r/${token}/respostas`), {
+      method: 'PUT',
+      body: { respostas }
+    })
+    // uma resposta antiga que chegou depois de uma nova nao manda na tela
+    if (meu !== seq || !data.value) return
+    const agora = new Date()
+    for (const { itemId } of respostas) {
+      errosResp[itemId] = r.erros[itemId] ?? null
+      if (!r.erros[itemId]) salvoEm[itemId] = agora
+    }
+    // so os itens de resposta: os de documento seguem o fluxo do upload
+    data.value = {
+      ...data.value,
+      status: r.status,
+      itens: data.value.itens.map(i => (ehDocumento(i) ? i : (r.itens.find(x => x.id === i.id) ?? i)))
+    }
+  } catch (e: any) {
+    for (const { itemId } of respostas) {
+      pendentes.add(itemId)
+      errosResp[itemId] = e?.statusCode === 429 ? 'Muitas alterações seguidas. Tentaremos de novo em instantes.' : e?.data?.statusMessage || 'Não foi possível salvar. Confira a conexão.'
+    }
+    if (meu === seq) espera = setTimeout(() => salvarRespostas(), 10_000)
+  } finally {
+    if (meu === seq) salvandoResp.value = false
+  }
+}
+
+function aoEsconder() {
+  if (document.visibilityState === 'hidden') salvarRespostas({ aoSair: true })
+}
+const aoSair = () => salvarRespostas({ aoSair: true })
+onMounted(() => {
+  document.addEventListener('visibilitychange', aoEsconder)
+  window.addEventListener('pagehide', aoSair)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', aoEsconder)
+  window.removeEventListener('pagehide', aoSair)
+})
+
+function estadoResposta(item: Item) {
+  if (errosResp[item.id]) return null
+  if (pendentes.has(item.id) || salvandoResp.value) return 'Salvando…'
+  const d = salvoEm[item.id]
+  return d && item.resposta ? `Salvo às ${formatarHora(d).slice(0, 5)}` : null
+}
 
 /* ---------- envio de arquivos ---------- */
 type Subindo = { chave: string; itemId: number; nome: string; progresso: number; erro: string | null }
@@ -155,6 +273,13 @@ const ROTULO_CLIENTE: Record<StatusItemSolicitacao, string> = {
   recusado: 'Precisa enviar de novo',
   nao_possui: 'Você não possui'
 }
+function rotuloCliente(i: Item) {
+  if (ehDocumento(i)) return ROTULO_CLIENTE[i.status]
+  if (i.status === 'enviado') return 'Respondido'
+  if (i.status === 'recusado') return 'Precisa corrigir'
+  if (i.status === 'aprovado' && i.config.conferir === false) return 'Respondido'
+  return ROTULO_CLIENTE[i.status]
+}
 const COR_CARTAO: Record<StatusItemSolicitacao, string> = {
   pendente: 'border-default',
   enviado: 'border-info/40',
@@ -164,7 +289,7 @@ const COR_CARTAO: Record<StatusItemSolicitacao, string> = {
 }
 
 const textoWhatsapp = computed(() =>
-  data.value ? `Ola! Tenho uma duvida sobre a solicitacao de documentos ${data.value.codigo} (${data.value.titulo}).` : 'Ola!'
+  data.value ? `Ola! Tenho uma duvida sobre a solicitacao ${data.value.codigo} (${data.value.titulo}).` : 'Ola!'
 )
 </script>
 
@@ -220,7 +345,7 @@ const textoWhatsapp = computed(() =>
             variant="subtle"
             icon="i-lucide-badge-check"
             title="Recebemos tudo, obrigado!"
-            description="A nossa equipe conferiu os documentos. Não é preciso enviar mais nada."
+            :description="soDocumentos ? 'A nossa equipe conferiu os documentos. Não é preciso enviar mais nada.' : 'A nossa equipe conferiu tudo. Não é preciso enviar mais nada.'"
           />
           <UAlert
             v-else-if="recusados"
@@ -228,7 +353,11 @@ const textoWhatsapp = computed(() =>
             color="error"
             variant="subtle"
             icon="i-lucide-circle-alert"
-            :title="recusados === 1 ? 'Um documento precisa ser enviado de novo' : `${recusados} documentos precisam ser enviados de novo`"
+            :title="
+              soDocumentos
+                ? recusados === 1 ? 'Um documento precisa ser enviado de novo' : `${recusados} documentos precisam ser enviados de novo`
+                : recusados === 1 ? 'Um item precisa ser corrigido' : `${recusados} itens precisam ser corrigidos`
+            "
             description="O motivo está no próprio item, logo abaixo."
           />
           <UAlert
@@ -242,160 +371,181 @@ const textoWhatsapp = computed(() =>
           />
 
           <div class="space-y-3">
-            <section
-              v-for="(item, n) in data.itens"
-              :key="item.id"
-              class="rounded-xl border bg-default p-4 shadow-xs"
-              :class="COR_CARTAO[item.status]"
-            >
-              <div class="flex items-start gap-3">
-                <span
-                  class="flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
-                  :class="entregue(item) ? 'bg-success/15 text-success' : item.status === 'recusado' ? 'bg-error/15 text-error' : 'bg-elevated text-muted'"
-                >
-                  <UIcon v-if="entregue(item)" name="i-lucide-check" class="size-4" />
-                  <template v-else>{{ n + 1 }}</template>
-                </span>
-                <div class="min-w-0 flex-1">
-                  <h3 class="font-medium leading-snug">
-                    {{ item.titulo }}
-                    <span v-if="!item.obrigatorio" class="text-xs font-normal text-muted">(opcional)</span>
-                  </h3>
-                  <p v-if="item.instrucao" class="mt-0.5 text-sm text-muted">{{ item.instrucao }}</p>
-                  <p class="mt-0.5 text-xs text-muted">{{ descreverFamilias(item.tipos) }} · até {{ item.maxArquivos }} arquivo(s)</p>
-                </div>
-                <UBadge
-                  v-if="item.status !== 'pendente'"
-                  :color="COR_STATUS_ITEM[item.status]"
-                  variant="subtle"
-                  size="sm"
-                  class="shrink-0"
-                >{{ ROTULO_CLIENTE[item.status] }}</UBadge>
-              </div>
-
-              <div v-if="item.status === 'recusado' && item.motivo" class="mt-3 rounded-lg bg-error/10 px-3 py-2 text-sm text-error">
-                <strong>O que precisa mudar:</strong> {{ item.motivo }}
-              </div>
-              <div v-if="item.status === 'nao_possui'" class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm">
-                <span>Você informou que não possui{{ item.motivo ? `: “${item.motivo}”` : '.' }}<template v-if="item.analisado"> A equipe já conferiu.</template></span>
-                <UButton v-if="!encerrada && !item.analisado" label="Desfazer" size="xs" color="neutral" variant="ghost" :loading="ocupado" @click="desfazer(item)" />
-              </div>
-
-              <!-- arquivo modelo -->
-              <a
-                v-if="item.modeloNome && podeMexer(item) && item.status !== 'nao_possui'"
-                :href="api(`/api/r/${token}/itens/${item.id}/modelo`)"
-                class="mt-3 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-sm text-primary hover:bg-primary/5"
+            <template v-for="item in data.itens" :key="item.id">
+              <!-- texto escrito por quem pediu: so para ler -->
+              <section v-if="ehInformativo(item)" class="px-1 py-1">
+                <h3 v-if="item.titulo" class="mb-1.5 font-semibold">{{ item.titulo }}</h3>
+                <div class="text-sm" :class="classesInformativo(item.config)">{{ item.config.texto }}</div>
+              </section>
+              <section
+                v-else
+                class="rounded-xl border bg-default p-4 shadow-xs"
+                :class="COR_CARTAO[item.status]"
               >
-                <UIcon name="i-lucide-file-down" class="size-4 shrink-0" />
-                <span class="min-w-0 flex-1 truncate">Baixe o modelo, preencha e envie de volta: {{ item.modeloNome }}</span>
-              </a>
-
-              <!-- arquivos já enviados -->
-              <ul v-if="item.arquivos.length" class="mt-3 space-y-1.5">
-                <li v-for="a in item.arquivos" :key="a.id" class="flex items-center gap-2 rounded-lg bg-elevated/60 px-3 py-2 text-sm">
-                  <UIcon :name="iconeDoArquivo(a.nome, TIPOS_SOLICITACAO)" class="size-4 shrink-0 text-primary" />
-                  <span class="min-w-0 flex-1 truncate">{{ a.nome }}</span>
-                  <span v-if="a.antivirus === 'pendente' || a.antivirus === 'erro'" class="shrink-0 text-xs text-muted">verificando…</span>
-                  <span v-else class="shrink-0 text-xs text-muted">{{ tamanho(a.tamanho) }}</span>
-                  <UButton
-                    v-if="podeMexer(item)"
-                    icon="i-lucide-x"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    :aria-label="`Remover ${a.nome}`"
-                    @click="removendo = { item, arquivo: a }"
-                  />
-                </li>
-              </ul>
-
-              <!-- subindo agora / erros -->
-              <ul v-if="subindoDo(item).length" class="mt-3 space-y-1.5">
-                <li v-for="s in subindoDo(item)" :key="s.chave" class="rounded-lg border px-3 py-2 text-sm" :class="s.erro ? 'border-error/40 bg-error/5' : 'border-default'">
-                  <div class="flex items-center gap-2">
-                    <UIcon :name="s.erro ? 'i-lucide-circle-alert' : 'i-lucide-loader-circle'" class="size-4 shrink-0" :class="s.erro ? 'text-error' : 'animate-spin text-primary'" />
-                    <span class="min-w-0 flex-1 truncate">{{ s.nome }}</span>
-                    <span v-if="!s.erro" class="shrink-0 text-xs tabular-nums text-muted">{{ s.progresso }}%</span>
-                    <UButton v-else icon="i-lucide-x" size="xs" color="neutral" variant="ghost" aria-label="Dispensar" @click="dispensar(s.chave)" />
+                <div class="flex items-start gap-3">
+                  <span
+                    class="flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
+                    :class="entregue(item) ? 'bg-success/15 text-success' : item.status === 'recusado' ? 'bg-error/15 text-error' : 'bg-elevated text-muted'"
+                  >
+                    <UIcon v-if="entregue(item)" name="i-lucide-check" class="size-4" />
+                    <template v-else>{{ numero.get(item.id) }}</template>
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <h3 class="font-medium leading-snug">
+                      {{ item.titulo }}
+                      <span v-if="!item.obrigatorio" class="text-xs font-normal text-muted">(opcional)</span>
+                    </h3>
+                    <p v-if="item.instrucao" class="mt-0.5 text-sm text-muted">{{ item.instrucao }}</p>
+                    <p v-if="ehDocumento(item)" class="mt-0.5 text-xs text-muted">{{ descreverFamilias(item.tipos) }} · até {{ item.maxArquivos }} arquivo(s)</p>
                   </div>
-                  <p v-if="s.erro" class="mt-1 text-xs text-error">{{ s.erro }}</p>
-                  <div v-else class="mt-1.5 h-1 overflow-hidden rounded-full bg-elevated">
-                    <div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${s.progresso}%` }" />
-                  </div>
-                </li>
-              </ul>
-
-              <!-- ações -->
-              <div v-if="podeMexer(item) && item.status !== 'nao_possui'" class="mt-3">
-                <div v-if="naoPossuoAberto === item.id" class="space-y-2 rounded-lg border border-default p-3">
-                  <p class="text-sm font-medium">Não tem este documento?</p>
-                  <UTextarea
-                    v-model="justificativa"
-                    :rows="2"
-                    autoresize
-                    class="w-full"
-                    :placeholder="'Se quiser, conte o motivo'"
-                  />
-                  <div class="flex justify-end gap-2">
-                    <UButton label="Voltar" size="sm" color="neutral" variant="ghost" @click="naoPossuoAberto = null" />
-                    <UButton
-                      label="Confirmar"
-                      size="sm"
-                      color="warning"
-                      :disabled="item.obrigatorio"
-                      :loading="ocupado"
-                      @click="marcarNaoPossuo(item)"
-                    />
-                  </div>
+                  <UBadge
+                    v-if="item.status !== 'pendente'"
+                    :color="COR_STATUS_ITEM[item.status]"
+                    variant="subtle"
+                    size="sm"
+                    class="shrink-0"
+                  >{{ rotuloCliente(item) }}</UBadge>
                 </div>
-                <div v-else-if="ativos(item) < item.maxArquivos" class="flex flex-wrap gap-2">
-                  <!-- no celular o botão principal ocupa a linha; câmera e "não possuo" vão embaixo -->
-                  <label class="w-full min-w-0 sm:w-auto sm:flex-1">
-                    <input
-                      type="file"
-                      class="sr-only"
-                      multiple
-                      :accept="acceptDe(tiposDoItem(item.tipos))"
-                      @change="escolher(item, $event)"
-                    />
-                    <UButton
-                      as="span"
-                      :label="ativos(item) ? 'Enviar mais' : 'Escolher arquivo'"
-                      icon="i-lucide-upload"
-                      block
-                      class="cursor-pointer"
-                      :variant="ativos(item) ? 'outline' : 'solid'"
-                    />
-                  </label>
-                  <!-- câmera: no celular abre direto a traseira -->
-                  <label v-if="aceitaFoto(item)" class="sm:hidden">
-                    <input type="file" class="sr-only" accept="image/*" capture="environment" @change="escolher(item, $event)" />
-                    <UButton as="span" icon="i-lucide-camera" label="Foto" color="neutral" variant="outline" class="cursor-pointer" />
-                  </label>
-                  <!-- só no opcional: se é obrigatório, "não tenho" não é resposta -->
-                  <UButton
-                    v-if="!ativos(item) && !item.obrigatorio"
-                    label="Não possuo"
-                    color="neutral"
-                    variant="ghost"
-                    @click="naoPossuoAberto = item.id; justificativa = ''"
-                  />
+
+                <div v-if="item.status === 'recusado' && item.motivo" class="mt-3 rounded-lg bg-error/10 px-3 py-2 text-sm text-error">
+                  <strong>O que precisa mudar:</strong> {{ item.motivo }}
                 </div>
-                <p v-else class="text-xs text-muted">Limite de {{ item.maxArquivos }} arquivo(s) atingido. Remova um para enviar outro.</p>
-              </div>
-            </section>
+                <div v-if="item.status === 'nao_possui'" class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm">
+                  <span>Você informou que não possui{{ item.motivo ? `: “${item.motivo}”` : '.' }}<template v-if="item.analisado"> A equipe já conferiu.</template></span>
+                  <UButton v-if="!encerrada && !item.analisado" label="Desfazer" size="xs" color="neutral" variant="ghost" :loading="ocupado" @click="desfazer(item)" />
+                </div>
+
+                <!-- resposta -->
+                <div v-if="!ehDocumento(item)" class="mt-3">
+                  <RespostaItemSolic
+                    :model-value="rascunhos[item.id]"
+                    :item="item"
+                    :desabilitado="!podeResponder(item)"
+                    :erro="errosResp[item.id]"
+                    @update:model-value="v => mudou(item, v)"
+                    @salvar="salvarRespostas()"
+                  />
+                  <p v-if="estadoResposta(item)" class="mt-1 text-right text-xs text-muted">
+                    <UIcon :name="estadoResposta(item) === 'Salvando…' ? 'i-lucide-loader-circle' : 'i-lucide-cloud-check'" class="mr-1 align-[-2px]" :class="{ 'animate-spin': estadoResposta(item) === 'Salvando…' }" />{{ estadoResposta(item) }}
+                  </p>
+                </div>
+
+                <!-- arquivo modelo -->
+                <a
+                  v-if="item.modeloNome && podeMexer(item) && item.status !== 'nao_possui'"
+                  :href="api(`/api/r/${token}/itens/${item.id}/modelo`)"
+                  class="mt-3 flex items-center gap-2 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-sm text-primary hover:bg-primary/5"
+                >
+                  <UIcon name="i-lucide-file-down" class="size-4 shrink-0" />
+                  <span class="min-w-0 flex-1 truncate">Baixe o modelo, preencha e envie de volta: {{ item.modeloNome }}</span>
+                </a>
+
+                <!-- arquivos já enviados -->
+                <ul v-if="item.arquivos.length" class="mt-3 space-y-1.5">
+                  <li v-for="a in item.arquivos" :key="a.id" class="flex items-center gap-2 rounded-lg bg-elevated/60 px-3 py-2 text-sm">
+                    <UIcon :name="iconeDoArquivo(a.nome, TIPOS_SOLICITACAO)" class="size-4 shrink-0 text-primary" />
+                    <span class="min-w-0 flex-1 truncate">{{ a.nome }}</span>
+                    <span v-if="a.antivirus === 'pendente' || a.antivirus === 'erro'" class="shrink-0 text-xs text-muted">verificando…</span>
+                    <span v-else class="shrink-0 text-xs text-muted">{{ tamanho(a.tamanho) }}</span>
+                    <UButton
+                      v-if="podeMexer(item)"
+                      icon="i-lucide-x"
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      :aria-label="`Remover ${a.nome}`"
+                      @click="removendo = { item, arquivo: a }"
+                    />
+                  </li>
+                </ul>
+
+                <!-- subindo agora / erros -->
+                <ul v-if="subindoDo(item).length" class="mt-3 space-y-1.5">
+                  <li v-for="s in subindoDo(item)" :key="s.chave" class="rounded-lg border px-3 py-2 text-sm" :class="s.erro ? 'border-error/40 bg-error/5' : 'border-default'">
+                    <div class="flex items-center gap-2">
+                      <UIcon :name="s.erro ? 'i-lucide-circle-alert' : 'i-lucide-loader-circle'" class="size-4 shrink-0" :class="s.erro ? 'text-error' : 'animate-spin text-primary'" />
+                      <span class="min-w-0 flex-1 truncate">{{ s.nome }}</span>
+                      <span v-if="!s.erro" class="shrink-0 text-xs tabular-nums text-muted">{{ s.progresso }}%</span>
+                      <UButton v-else icon="i-lucide-x" size="xs" color="neutral" variant="ghost" aria-label="Dispensar" @click="dispensar(s.chave)" />
+                    </div>
+                    <p v-if="s.erro" class="mt-1 text-xs text-error">{{ s.erro }}</p>
+                    <div v-else class="mt-1.5 h-1 overflow-hidden rounded-full bg-elevated">
+                      <div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${s.progresso}%` }" />
+                    </div>
+                  </li>
+                </ul>
+
+                <!-- ações -->
+                <div v-if="ehDocumento(item) && podeMexer(item) && item.status !== 'nao_possui'" class="mt-3">
+                  <div v-if="naoPossuoAberto === item.id" class="space-y-2 rounded-lg border border-default p-3">
+                    <p class="text-sm font-medium">Não tem este documento?</p>
+                    <UTextarea
+                      v-model="justificativa"
+                      :rows="2"
+                      autoresize
+                      class="w-full"
+                      :placeholder="'Se quiser, conte o motivo'"
+                    />
+                    <div class="flex justify-end gap-2">
+                      <UButton label="Voltar" size="sm" color="neutral" variant="ghost" @click="naoPossuoAberto = null" />
+                      <UButton
+                        label="Confirmar"
+                        size="sm"
+                        color="warning"
+                        :disabled="item.obrigatorio"
+                        :loading="ocupado"
+                        @click="marcarNaoPossuo(item)"
+                      />
+                    </div>
+                  </div>
+                  <div v-else-if="ativos(item) < item.maxArquivos" class="flex flex-wrap gap-2">
+                    <!-- no celular o botão principal ocupa a linha; câmera e "não possuo" vão embaixo -->
+                    <label class="w-full min-w-0 sm:w-auto sm:flex-1">
+                      <input
+                        type="file"
+                        class="sr-only"
+                        multiple
+                        :accept="acceptDe(tiposDoItem(item.tipos))"
+                        @change="escolher(item, $event)"
+                      />
+                      <UButton
+                        as="span"
+                        :label="ativos(item) ? 'Enviar mais' : 'Escolher arquivo'"
+                        icon="i-lucide-upload"
+                        block
+                        class="cursor-pointer"
+                        :variant="ativos(item) ? 'outline' : 'solid'"
+                      />
+                    </label>
+                    <!-- câmera: no celular abre direto a traseira -->
+                    <label v-if="aceitaFoto(item)" class="sm:hidden">
+                      <input type="file" class="sr-only" accept="image/*" capture="environment" @change="escolher(item, $event)" />
+                      <UButton as="span" icon="i-lucide-camera" label="Foto" color="neutral" variant="outline" class="cursor-pointer" />
+                    </label>
+                    <!-- só no opcional: se é obrigatório, "não tenho" não é resposta -->
+                    <UButton
+                      v-if="!ativos(item) && !item.obrigatorio"
+                      label="Não possuo"
+                      color="neutral"
+                      variant="ghost"
+                      @click="naoPossuoAberto = item.id; justificativa = ''"
+                    />
+                  </div>
+                  <p v-else class="text-xs text-muted">Limite de {{ item.maxArquivos }} arquivo(s) atingido. Remova um para enviar outro.</p>
+                </div>
+              </section>
+            </template>
           </div>
 
           <div class="mt-6 rounded-lg border border-default bg-default/50 p-4">
             <div class="flex gap-3">
               <UIcon name="i-lucide-shield-check" class="size-5 shrink-0 text-muted" />
               <div class="space-y-1 text-xs leading-relaxed text-muted">
-                <p class="font-medium text-default">Seus documentos em segurança</p>
+                <p class="font-medium text-default">Seus dados em segurança</p>
                 <p>
-                  Os arquivos passam por um antivírus e ficam guardados pela Contábil Gaulke, usados somente para esta finalidade.
+                  Os arquivos passam por um antivírus e, com as respostas, ficam guardados pela Contábil Gaulke, usados somente para esta finalidade.
                   Registramos a data, a hora e o endereço IP de cada envio, conforme a Lei 13.709/2018 (LGPD).
-                  Você pode enviar aos poucos: este link guarda o que já foi enviado. Ele é pessoal — evite compartilhá-lo.
+                  Você pode fazer aos poucos: este link guarda o que já foi enviado e respondido. Ele é pessoal — evite compartilhá-lo.
                 </p>
               </div>
             </div>

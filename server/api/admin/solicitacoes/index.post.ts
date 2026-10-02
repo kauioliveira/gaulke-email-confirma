@@ -6,6 +6,7 @@ import { auditar } from '../../../utils/auditoria'
 import { suprimidos } from '../../../utils/supressao'
 import { criarSolicSchema, enviarEmailSolic, registrarEventoSolic } from '../../../utils/solicitacoes'
 import { pastaDaSolicitacao } from '../../../utils/documentos'
+import { registrarContatosEmpresa } from '../../../utils/empresa-contatos'
 import { novoCodigoSolicitacao } from '../../../utils/solicitacoes'
 
 /**
@@ -87,14 +88,16 @@ export default defineEventHandler(async event => {
   for (const id of ids) {
     await registrarEventoSolic(id, 'criada', `Solicitação criada por ${op.nome}`, { porNome: op.nome })
   }
+  // aprende qual e-mail recebe por CPF/CNPJ (sugestao na busca de empresa)
+  await registrarContatosEmpresa(destinatarios, 'solicitacao')
 
   await auditar(event, 'solicitacao.criar', {
     entidade: 'solicitacao',
     id: ids.length === 1 ? ids[0] : grupo,
     resumo:
       ids.length === 1
-        ? `Pediu documentos a ${destinatarios[0]!.email}: "${d.titulo}" (${codigoDe.get(ids[0]!)}, ${d.itens.length} itens)`
-        : `Pediu documentos a ${ids.length} clientes: "${d.titulo}" (${d.itens.length} itens)`,
+        ? `Fez a solicitação a ${destinatarios[0]!.email}: "${d.titulo}" (${codigoDe.get(ids[0]!)}, ${d.itens.length} itens)`
+        : `Fez a solicitação a ${ids.length} clientes: "${d.titulo}" (${d.itens.length} itens)`,
     dados: {
       ids,
       titulo: d.titulo,

@@ -1,12 +1,12 @@
 import { z } from 'zod'
-import { itemSolicSchema, montarEmail } from '../../../utils/solicitacoes'
+import { itemSolicBase, montarEmail } from '../../../utils/solicitacoes'
 import type { Solicitacao, SolicItem } from '../../../db'
 
 const schema = z.object({
   titulo: z.string().trim().max(200).default(''),
   mensagem: z.string().trim().max(4000).nullish(),
   prazo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
-  itens: z.array(itemSolicSchema.extend({ titulo: z.string().trim().max(200) })).max(40),
+  itens: z.array(itemSolicBase.extend({ titulo: z.string().trim().max(200) })).max(40),
   destinatario: z.object({ nome: z.string().nullish(), email: z.string().default('cliente@exemplo.com.br'), empresa: z.string().nullish() }).nullish()
 })
 

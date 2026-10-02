@@ -29,38 +29,9 @@ const mensagem = ref('')
 const clienteNome = ref('')
 const clienteDocumento = ref('')
 
-/* cliente: texto livre, com sugestões das empresas e clientes cadastrados */
-type EmpresaEncontrada = { nome: string; fantasia: string | null; documento: string | null; tipo: 'empresa' | 'pessoa'; ativo: boolean }
-const sugestoes = ref<EmpresaEncontrada[]>([])
-const mostrarSugestoes = ref(false)
-const buscandoCliente = ref(false)
-let atrasoCliente: ReturnType<typeof setTimeout> | undefined
-let escolhendo = false
-watch(clienteNome, v => {
-  if (escolhendo) { escolhendo = false; return }
-  clearTimeout(atrasoCliente)
-  if (v.trim().length < 2) { sugestoes.value = []; return }
-  atrasoCliente = setTimeout(async () => {
-    buscandoCliente.value = true
-    try {
-      sugestoes.value = await $fetch<EmpresaEncontrada[]>(api('/api/admin/empresas'), { query: { busca: v.trim() } })
-      mostrarSugestoes.value = true
-    } catch {
-      sugestoes.value = []
-    } finally {
-      buscandoCliente.value = false
-    }
-  }, 300)
-})
+/* cliente: texto livre, com sugestões das empresas e clientes cadastrados (BuscaEmpresa) */
 function escolherCliente(e: EmpresaEncontrada) {
-  escolhendo = true
-  clienteNome.value = e.nome
   clienteDocumento.value = formatarDocumento(e.documento)
-  mostrarSugestoes.value = false
-}
-function fecharSugestoes() {
-  // o clique numa sugestão acontece antes do blur terminar
-  setTimeout(() => (mostrarSugestoes.value = false), 150)
 }
 
 async function escolherPdf(e: Event) {
@@ -295,34 +266,7 @@ async function enviar() {
         </UFormField>
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField label="Cliente / empresa (opcional)" help="Digite para buscar nos clientes da Gaulke, ou escreva livremente. Organiza a pasta.">
-            <div class="relative">
-              <UInput
-                v-model="clienteNome"
-                icon="i-lucide-building-2"
-                :loading="buscandoCliente"
-                placeholder="Razão social, fantasia ou CNPJ"
-                autocomplete="off"
-                class="w-full"
-                @focus="mostrarSugestoes = sugestoes.length > 0"
-                @blur="fecharSugestoes"
-              />
-              <ul
-                v-if="mostrarSugestoes && sugestoes.length"
-                class="absolute inset-x-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-lg border border-default bg-default py-1 shadow-lg"
-              >
-                <li v-for="(e, i) in sugestoes" :key="i">
-                  <button type="button" class="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-elevated" @mousedown.prevent="escolherCliente(e)">
-                    <UIcon :name="e.tipo === 'empresa' ? 'i-lucide-building-2' : 'i-lucide-user-round'" class="mt-0.5 size-4 shrink-0 text-muted" />
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate text-sm" :class="!e.ativo && 'text-muted line-through'">{{ e.nome }}</span>
-                      <span class="block truncate text-xs text-muted">
-                        {{ [e.fantasia, e.documento && formatarDocumento(e.documento), !e.ativo && 'inativo'].filter(Boolean).join(' · ') || (e.tipo === 'empresa' ? 'empresa' : 'pessoa física') }}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              </ul>
-            </div>
+            <BuscaEmpresa v-model="clienteNome" @escolher="escolherCliente" />
           </UFormField>
           <UFormField label="CPF/CNPJ do cliente" :error="clienteDocumento && !documentoValido(clienteDocumento) ? 'CPF tem 11 dígitos; CNPJ, 14' : undefined">
             <UInput

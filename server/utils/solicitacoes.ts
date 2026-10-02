@@ -43,8 +43,11 @@ import type {
   StatusSolicitacao,
   StatusItemSolicitacao,
   StatusAntivirus,
-  LandingSolicitacao
+  LandingSolicitacao,
+  ConfigItem,
+  RespostaItem
 } from '../../shared/types/api'
+import { TIPOS_ITEM_VALIDOS, normalizarConfig, validarResposta, rotuloTipoItem } from '../../shared/utils/itens-solic'
 
 /**
  * Solicitacao de documentos: a Gaulke pede, o cliente entrega item a item
@@ -65,8 +68,13 @@ const MAX_POR_ITEM_TETO = 30
 
 const familiasValidas = FAMILIAS_SOLICITACAO.map(f => f.valor) as [string, ...string[]]
 
-export const itemSolicSchema = z.object({
-  titulo: z.string().trim().min(1, 'Informe o nome do item').max(200),
+/** Campos do item sem a conferencia por tipo (a previa do e-mail aceita item pela metade). */
+export const itemSolicBase = z.object({
+  tipo: z.enum(TIPOS_ITEM_VALIDOS).default('documento'),
+  // conferido por tipo no transform de itemSolicSchema (normalizarConfig)
+  config: z.record(z.string(), z.unknown()).nullish().transform(v => (v ?? {}) as ConfigItem),
+  // o "texto / informacao" pode nao ter titulo; os demais exigem (no transform)
+  titulo: z.string().trim().max(200),
   instrucao: z.string().trim().max(1000).nullish().transform(v => v || null),
   obrigatorio: z.boolean().default(true),
   tipos: z.array(z.enum(familiasValidas)).max(familiasValidas.length).default([]),
@@ -78,6 +86,25 @@ export const itemSolicSchema = z.object({
     .nullish()
     .transform(v => v || null),
   modeloNome: z.string().trim().max(260).nullish().transform(v => v || null)
+})
+
+export const itemSolicSchema = itemSolicBase.transform((item, ctx) => {
+  if (!item.titulo && item.tipo !== 'informativo') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Informe o nome do item', path: ['titulo'] })
+    return z.NEVER
+  }
+  const cfg = normalizarConfig(item.tipo, item.config)
+  if (!cfg.ok) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${item.titulo || rotuloTipoItem(item.tipo)}: ${cfg.erro}`, path: ['config'] })
+    return z.NEVER
+  }
+  // texto so para leitura: nunca obrigatorio, nunca recebe nada
+  if (item.tipo === 'informativo') {
+    return { ...item, obrigatorio: false, config: cfg.valor, tipos: [], maxArquivos: 1, modeloPath: null, modeloNome: null }
+  }
+  // so documento recebe arquivo: os campos de arquivo dos demais ficam neutros
+  if (item.tipo !== 'documento') return { ...item, config: cfg.valor, tipos: [], maxArquivos: 1, modeloPath: null, modeloNome: null }
+  return { ...item, config: cfg.valor }
 })
 
 const destinatarioSchema = z.object({
@@ -105,7 +132,7 @@ export const criarSolicSchema = z.object({
   avisarConclusao: z.boolean().default(true),
   contaId: z.number().int().positive().nullish(),
   responderPara: z.string().trim().max(300).nullish().transform(v => v || null),
-  itens: z.array(itemSolicSchema).min(1, 'Inclua pelo menos um documento').max(40),
+  itens: z.array(itemSolicSchema).min(1, 'Inclua pelo menos um item').max(40),
   destinatarios: z.array(destinatarioSchema).min(1, 'Inclua pelo menos um cliente').max(500)
 })
 
@@ -143,13 +170,15 @@ export async function registrarEventoSolic(
  * Estado
  * ---------------------------------------------------------------------- */
 
-type ItemParaStatus = Pick<SolicItem, 'status' | 'obrigatorio' | 'analisadoEm'>
+type ItemParaStatus = Pick<SolicItem, 'status' | 'obrigatorio' | 'analisadoEm'> & { tipo?: SolicItem['tipo'] }
 
 const entregue = (i: ItemParaStatus) => i.status === 'enviado' || i.status === 'aprovado' || i.status === 'nao_possui'
 const resolvido = (i: ItemParaStatus) => i.status === 'aprovado' || (i.status === 'nao_possui' && !!i.analisadoEm)
 const esperandoAnalise = (i: ItemParaStatus) => i.status === 'enviado' || (i.status === 'nao_possui' && !i.analisadoEm)
 
-export function statusPelosItens(itens: ItemParaStatus[]): 'aberta' | 'em_analise' | 'concluida' {
+export function statusPelosItens(todos: ItemParaStatus[]): 'aberta' | 'em_analise' | 'concluida' {
+  // "texto / informacao" so se le: nao conta para nada
+  const itens = todos.filter(i => i.tipo !== 'informativo')
   const obrig = itens.filter(i => i.obrigatorio)
   const algoEsperando = itens.some(esperandoAnalise)
   const temResolvido = itens.some(resolvido)
@@ -190,7 +219,7 @@ export async function recalcularStatus(solicId: number, porNome?: string | null)
     .where(eq(solicitacoes.id, solicId))
 
   if (depois === 'concluida') {
-    await registrarEventoSolic(solicId, 'concluida', 'Todos os documentos obrigatórios foram aprovados', { porNome })
+    await registrarEventoSolic(solicId, 'concluida', 'Todos os itens obrigatórios foram aprovados', { porNome })
     if (s.avisarConclusao) await enviarEmailSolic(solicId, 'concluida')
     await webhookSolicitacao('solicitacao.concluida', s, { concluidaPor: porNome ?? null, automatica: true })
   }
@@ -242,37 +271,59 @@ const RODAPE_SOLIC =
 export type TipoEmailSolic = 'pedido' | 'lembrete' | 'pendencias' | 'concluida'
 
 function rotuloItem(i: SolicItem) {
-  const formato = i.tipos.length ? ` — ${descreverFamilias(i.tipos)}` : ''
+  const formato =
+    i.tipo !== 'documento' ? ` — ${rotuloTipoItem(i.tipo).toLowerCase()}` : i.tipos.length ? ` — ${descreverFamilias(i.tipos)}` : ''
   return `${i.titulo}${i.obrigatorio ? '' : ' (opcional)'}${formato}`
 }
 
-export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, itens: SolicItem[]) {
+/** O que a solicitacao pede: so arquivos, so respostas ou os dois — muda o texto dos e-mails. */
+function natureza(todos: Pick<SolicItem, 'tipo'>[]): 'documentos' | 'respostas' | 'misto' {
+  const itens = todos.filter(i => i.tipo !== 'informativo')
+  const docs = itens.filter(i => i.tipo === 'documento').length
+  return docs === itens.length ? 'documentos' : docs === 0 ? 'respostas' : 'misto'
+}
+
+const contarItens = (n: number, nat: ReturnType<typeof natureza>) =>
+  nat === 'documentos' ? (n === 1 ? 'um documento' : `${n} documentos`) : n === 1 ? 'um item' : `${n} itens`
+
+export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, todos: SolicItem[]) {
+  // o e-mail lista o que o cliente precisa fazer; texto informativo fica na pagina
+  const itens = todos.filter(i => i.tipo !== 'informativo')
   const prazo = s.prazo ? formatarData(`${s.prazo}T12:00:00${DESLOCAMENTO_SP}`) : null
   const blocos: Bloco[] = [
     { id: 'logo', tipo: 'logo', alinhamento: 'centro' },
     { id: 'ola', tipo: 'titulo', texto: 'Olá, {{nome}}!' }
   ]
+  const nat = natureza(itens)
   let assunto = ''
-  let botao = 'Enviar documentos'
+  let botao = nat === 'documentos' ? 'Enviar documentos' : nat === 'respostas' ? 'Responder' : 'Enviar e responder'
 
   if (tipo === 'pedido') {
-    assunto = `Documentos solicitados: ${s.titulo}`
+    const oQue = { documentos: 'alguns documentos', respostas: 'algumas informações', misto: 'alguns documentos e informações' }[nat]
+    assunto = `${{ documentos: 'Documentos solicitados', respostas: 'Informações solicitadas', misto: 'Documentos e informações solicitados' }[nat]}: ${s.titulo}`
     blocos.push({
       id: 'intro',
       tipo: 'texto',
-      texto:
-        s.mensagem ||
-        `A Contábil Gaulke precisa de alguns documentos{{#empresa}} de {{empresa}}{{/empresa}} para dar andamento a: ${s.titulo}.`
+      texto: s.mensagem || `A Contábil Gaulke precisa de ${oQue}{{#empresa}} de {{empresa}}{{/empresa}} para dar andamento a: ${s.titulo}.`
     })
-    blocos.push({ id: 'o-que', tipo: 'texto', texto: 'Pelo botão abaixo você envia cada um deles, direto do computador ou tirando uma foto com o celular:', alinhamento: 'esquerda' })
+    blocos.push({
+      id: 'o-que',
+      tipo: 'texto',
+      texto: {
+        documentos: 'Pelo botão abaixo você envia cada um deles, direto do computador ou tirando uma foto com o celular:',
+        respostas: 'Pelo botão abaixo você responde cada item, direto no navegador:',
+        misto: 'Pelo botão abaixo você responde as perguntas e envia os documentos, do computador ou tirando uma foto com o celular:'
+      }[nat],
+      alinhamento: 'esquerda'
+    })
     blocos.push({ id: 'itens', tipo: 'lista', itens: itens.map(rotuloItem), alinhamento: 'esquerda' })
   } else if (tipo === 'lembrete') {
     const faltam = itens.filter(i => i.obrigatorio && (i.status === 'pendente' || i.status === 'recusado'))
-    assunto = `Lembrete: ainda faltam documentos — ${s.titulo}`
+    assunto = `Lembrete: ainda faltam ${nat === 'documentos' ? 'documentos' : 'itens'} — ${s.titulo}`
     blocos.push({
       id: 'intro',
       tipo: 'texto',
-      texto: `Ainda não recebemos ${faltam.length === 1 ? 'um documento' : `${faltam.length} documentos`} da solicitação "${s.titulo}":`
+      texto: `Ainda não recebemos ${contarItens(faltam.length, nat)} da solicitação "${s.titulo}":`
     })
     blocos.push({ id: 'itens', tipo: 'lista', itens: faltam.map(rotuloItem), alinhamento: 'esquerda' })
   } else if (tipo === 'pendencias') {
@@ -282,7 +333,10 @@ export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, itens: SolicIt
     blocos.push({
       id: 'intro',
       tipo: 'texto',
-      texto: `Analisamos os documentos da solicitação "${s.titulo}". ${recusados.length === 1 ? 'Um deles precisa' : 'Alguns precisam'} ser enviados de novo:`
+      texto:
+        nat === 'documentos'
+          ? `Analisamos os documentos da solicitação "${s.titulo}". ${recusados.length === 1 ? 'Um deles precisa' : 'Alguns precisam'} ser enviados de novo:`
+          : `Analisamos o que foi enviado na solicitação "${s.titulo}". ${recusados.length === 1 ? 'Um item precisa' : 'Alguns itens precisam'} ser corrigidos:`
     })
     blocos.push({
       id: 'itens',
@@ -290,14 +344,18 @@ export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, itens: SolicIt
       itens: recusados.map(i => `${i.titulo}: ${i.motivo || 'envie novamente'}`),
       alinhamento: 'esquerda'
     })
-    blocos.push({ id: 'resto', tipo: 'texto', texto: 'Os demais documentos já foram recebidos — não é preciso enviá-los de novo.' })
+    blocos.push({
+      id: 'resto',
+      tipo: 'texto',
+      texto: nat === 'documentos' ? 'Os demais documentos já foram recebidos — não é preciso enviá-los de novo.' : 'O restante já foi recebido — não é preciso enviar de novo.'
+    })
   } else {
-    assunto = `Documentos recebidos — ${s.titulo}`
+    assunto = `${nat === 'documentos' ? 'Documentos recebidos' : 'Recebemos tudo'} — ${s.titulo}`
     botao = 'Ver o que foi enviado'
     blocos.push({
       id: 'intro',
       tipo: 'texto',
-      texto: `Recebemos e conferimos os documentos da solicitação "${s.titulo}". Não é preciso enviar mais nada. Obrigado!`
+      texto: `Recebemos e conferimos ${nat === 'documentos' ? 'os documentos' : 'tudo o que foi enviado'} na solicitação "${s.titulo}". Não é preciso enviar mais nada. Obrigado!`
     })
   }
 
@@ -309,7 +367,7 @@ export function montarEmail(tipo: TipoEmailSolic, s: Solicitacao, itens: SolicIt
     blocos.push({
       id: 'dica',
       tipo: 'texto',
-      texto: 'Você pode enviar aos poucos: o link continua valendo e guarda o que já foi enviado.',
+      texto: 'Você pode fazer aos poucos: o link continua valendo e guarda o que já foi enviado.',
       alinhamento: 'esquerda'
     })
   }
@@ -494,6 +552,7 @@ export async function receberArquivo(o: {
 }) {
   const { solic, item } = o
   if (solic.status === 'concluida' || solic.status === 'cancelada') recusar('Esta solicitação já foi encerrada.', 409)
+  if (item.tipo !== 'documento') recusar('Este item é respondido na própria página, sem arquivo.', 409)
   if (item.status === 'aprovado') recusar('Este documento já foi aprovado — não é preciso enviar de novo.', 409)
   if (item.status === 'nao_possui') recusar('Você marcou que não possui este documento. Desfaça antes de enviar um arquivo.', 409)
 
@@ -718,9 +777,15 @@ export async function avisarEntregasConcluidas() {
     const analisar = itens.filter(esperandoAnalise)
     await avisarEquipe(
       s,
-      'Documentos prontos para análise',
-      `${s.destinatarioNome || s.destinatarioEmail}${s.empresa ? ` (${s.empresa})` : ''} entregou os documentos obrigatórios de "${s.titulo}".`,
-      analisar.map(i => (i.status === 'nao_possui' ? `${i.titulo} — informou que não possui` : i.titulo))
+      natureza(itens) === 'documentos' ? 'Documentos prontos para análise' : 'Solicitação pronta para análise',
+      `${s.destinatarioNome || s.destinatarioEmail}${s.empresa ? ` (${s.empresa})` : ''} entregou os itens obrigatórios de "${s.titulo}".`,
+      analisar.map(i =>
+        i.status === 'nao_possui'
+          ? `${i.titulo} — informou que não possui`
+          : i.resposta
+            ? `${i.titulo}: ${i.resposta.exibicao.slice(0, 200)}`
+            : i.titulo
+      )
     )
     await webhookSolicitacao('solicitacao.entregue', s, {
       itens: analisar.map(i => ({ titulo: i.titulo, status: i.status }))
@@ -769,7 +834,7 @@ export const CONTAGENS_SOLIC = sql<{
     'aprovados', count(*) filter (where i.status = 'aprovado' or (i.status = 'nao_possui' and i.analisado_em is not null)),
     'para_analisar', count(*) filter (where i.status = 'enviado' or (i.status = 'nao_possui' and i.analisado_em is null)),
     'recusados', count(*) filter (where i.status = 'recusado')
-  ) from sys_mail_solic_itens i where i.solic_id = sys_mail_solic.id
+  ) from sys_mail_solic_itens i where i.solic_id = sys_mail_solic.id and i.tipo <> 'informativo'
 )`
 
 type Contagens = { total: number; obrigatorios: number; obrigatorios_entregues: number; aprovados: number; para_analisar: number; recusados: number }
@@ -853,6 +918,11 @@ export async function detalheSolicitacao(id: number): Promise<DetalheSolicitacao
     itens: itens.map(i => ({
       id: i.id,
       ordem: i.ordem,
+      tipo: i.tipo,
+      config: i.config,
+      resposta: i.resposta ?? null,
+      respondidoEm: iso(i.respondidoEm),
+      respostaIp: i.respostaIp,
       titulo: i.titulo,
       instrucao: i.instrucao,
       obrigatorio: i.obrigatorio,
@@ -934,6 +1004,10 @@ export async function landingSolicitacao(s: Solicitacao): Promise<LandingSolicit
     status: s.status as StatusSolicitacao,
     itens: itens.map(i => ({
       id: i.id,
+      tipo: i.tipo,
+      config: i.config,
+      resposta: i.resposta ?? null,
+      respondidoEm: i.respondidoEm ? i.respondidoEm.toISOString() : null,
       titulo: i.titulo,
       instrucao: i.instrucao,
       obrigatorio: i.obrigatorio,
@@ -975,6 +1049,8 @@ export async function registrarAcessoSolic(s: Solicitacao, ip: string | null) {
 /** "Nao possuo": vale para item pendente ou recusado, sem arquivo no item. */
 export async function marcarNaoPossui(s: Solicitacao, item: SolicItem, justificativa: string, ip: string | null) {
   if (s.status === 'concluida' || s.status === 'cancelada') recusar('Esta solicitação já foi encerrada.', 409)
+  // pergunta opcional nao precisa de "nao possuo": basta deixar em branco
+  if (item.tipo !== 'documento') recusar('Este item não é um documento.', 409)
   if (item.status !== 'pendente' && item.status !== 'recusado') {
     recusar(item.status === 'nao_possui' ? 'Você já marcou este item.' : 'Remova os arquivos deste item antes de marcar que não possui.', 409)
   }
@@ -1008,4 +1084,133 @@ export async function desfazerNaoPossui(s: Solicitacao, item: SolicItem, ip: str
     porNome: 'cliente'
   })
   await recalcularStatus(s.id)
+}
+
+/* -------------------------------------------------------------------------
+ * Respostas (itens que nao sao documento)
+ * ---------------------------------------------------------------------- */
+
+export interface EntradaResposta {
+  itemId: number
+  valor?: unknown
+}
+
+const shaTexto = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
+
+/**
+ * Grava as respostas do cliente. A pagina salva sozinha enquanto a pessoa
+ * digita, entao:
+ *   - cada item e validado por conta propria: o que passou fica salvo e o
+ *     que nao passou volta em `erros` (por item), sem derrubar o resto;
+ *   - resposta igual a gravada nao muda nada;
+ *   - o historico ganha no maximo um evento a cada 10 min por item (ou
+ *     quando o status muda), para o autosave nao virar uma enxurrada.
+ * Declaracao: guarda o sha-256 do texto aceito; com respondido_em, IP e
+ * navegador, prova o que foi aceito e quando.
+ */
+export async function salvarRespostas(
+  s: Solicitacao,
+  entradas: EntradaResposta[],
+  ctx: { ip: string | null; userAgent: string | null }
+) {
+  if (s.status === 'concluida' || s.status === 'cancelada') recusar('Esta solicitação já foi encerrada.', 409)
+  const db = useDb()
+  const ids = [...new Set(entradas.map(e => e.itemId))]
+  const itens = ids.length
+    ? await db.select().from(solicItens).where(and(eq(solicItens.solicId, s.id), inArray(solicItens.id, ids)))
+    : []
+  const porId = new Map(itens.map(i => [i.id, i]))
+  const erros: Record<number, string> = {}
+  const mudancas: { item: SolicItem; resposta: RespostaItem | null }[] = []
+
+  for (const e of entradas) {
+    const item = porId.get(e.itemId)
+    if (!item) {
+      erros[e.itemId] = 'Item não encontrado.'
+      continue
+    }
+    if (item.tipo === 'documento') {
+      erros[e.itemId] = 'Este item recebe arquivo, não resposta.'
+      continue
+    }
+    if (item.status === 'aprovado' && item.config.conferir !== false) {
+      erros[e.itemId] = 'A equipe já aprovou esta resposta. Fale conosco para mudar.'
+      continue
+    }
+    const v = validarResposta(item.tipo, item.config, e.valor)
+    if (!v.ok) {
+      erros[e.itemId] = v.erro
+      continue
+    }
+    let resposta = v.resposta
+    if (resposta && item.tipo === 'declaracao') resposta = { ...resposta, declaracaoSha256: shaTexto(item.config.texto ?? '') }
+    const igual =
+      (resposta === null && item.resposta == null) ||
+      (resposta !== null &&
+        item.resposta != null &&
+        JSON.stringify(resposta.valor) === JSON.stringify(item.resposta.valor) &&
+        resposta.outro === item.resposta.outro)
+    if (!igual) mudancas.push({ item, resposta })
+  }
+
+  if (mudancas.length) {
+    const agora = new Date()
+    await db.transaction(async tx => {
+      for (const { item, resposta } of mudancas) {
+        const auto = item.config.conferir === false
+        const recusado = item.status === 'recusado'
+        await tx
+          .update(solicItens)
+          .set(
+            resposta
+              ? {
+                  resposta,
+                  respondidoEm: agora,
+                  respostaIp: ctx.ip,
+                  respostaUserAgent: ctx.userAgent?.slice(0, 500) ?? null,
+                  status: auto ? 'aprovado' : 'enviado',
+                  motivo: null,
+                  analisadoEm: auto ? agora : null,
+                  analisadoPorNome: auto ? 'automático' : null,
+                  recusaAvisadaEm: null
+                }
+              : {
+                  // apagou: volta a pendente (recusado continua recusado, com o motivo)
+                  resposta: null,
+                  respondidoEm: null,
+                  status: recusado ? 'recusado' : 'pendente',
+                  analisadoEm: recusado ? item.analisadoEm : null,
+                  analisadoPorNome: recusado ? item.analisadoPorNome : null
+                }
+          )
+          .where(eq(solicItens.id, item.id))
+      }
+      if (mudancas.some(m => m.resposta)) await tx.update(solicitacoes).set({ ultimaEntregaEm: agora }).where(eq(solicitacoes.id, s.id))
+    })
+
+    for (const { item, resposta } of mudancas) {
+      const recente = item.respondidoEm && agora.getTime() - item.respondidoEm.getTime() < 10 * 60_000
+      const statusMudou = !resposta || item.status !== 'enviado'
+      if (recente && !statusMudou) continue
+      const descricao = !resposta
+        ? `Cliente apagou a resposta de "${item.titulo}"`
+        : item.tipo === 'declaracao'
+          ? `Cliente aceitou a declaração "${item.titulo}"`
+          : `Cliente respondeu "${item.titulo}": ${resposta.exibicao.slice(0, 200)}`
+      await registrarEventoSolic(s.id, resposta ? 'resposta' : 'resposta_apagada', descricao, {
+        itemId: item.id,
+        ip: ctx.ip,
+        porNome: 'cliente',
+        meta: resposta
+          ? item.tipo === 'declaracao'
+            ? { aceito: true, sha256: resposta.declaracaoSha256 }
+            : { exibicao: resposta.exibicao }
+          : {}
+      })
+    }
+    await recalcularStatus(s.id)
+  }
+
+  const [atual] = await db.select().from(solicitacoes).where(eq(solicitacoes.id, s.id))
+  return { erros, landing: await landingSolicitacao(atual ?? s) }
 }

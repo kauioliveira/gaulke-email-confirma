@@ -34,6 +34,39 @@ export function mascaraDocumento(v: string) {
 /** Vazio, CPF (11) ou CNPJ (14) */
 export const documentoValido = (v: string | null | undefined) => [0, 11, 14].includes(soDigitosDoc(v).length)
 
+/** CPF com digitos verificadores conferidos (rejeita 000.000.000-00 e afins) */
+export function cpfValido(v: string | null | undefined) {
+  const d = soDigitosDoc(v)
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false
+  const dv = (n: number) => {
+    let soma = 0
+    for (let i = 0; i < n; i++) soma += Number(d[i]) * (n + 1 - i)
+    const r = (soma * 10) % 11
+    return r === 10 ? 0 : r
+  }
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10])
+}
+
+/** CNPJ com digitos verificadores conferidos */
+export function cnpjValido(v: string | null | undefined) {
+  const d = soDigitosDoc(v)
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false
+  const dv = (n: number) => {
+    const pesos = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    const soma = pesos.reduce((t, p, i) => t + Number(d[i]) * p, 0)
+    const r = soma % 11
+    return r < 2 ? 0 : 11 - r
+  }
+  return dv(12) === Number(d[12]) && dv(13) === Number(d[13])
+}
+
+/** Documento preenchido e valido de verdade (com DV), no tipo aceito */
+export function documentoValidoDV(v: string | null | undefined, aceita: 'cpf' | 'cnpj' | 'ambos' = 'ambos') {
+  if (aceita !== 'cnpj' && cpfValido(v)) return true
+  if (aceita !== 'cpf' && cnpjValido(v)) return true
+  return false
+}
+
 /** Papeis de quem assina, na folha de assinaturas. Vazio tambem vale. */
 export const PAPEIS_ASSINATURA = [
   'Contratante',

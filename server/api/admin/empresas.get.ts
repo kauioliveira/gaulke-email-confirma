@@ -1,21 +1,17 @@
 import { useSql } from '../../db'
+import { contatosDasEmpresas, empresasDoHistorico } from '../../utils/empresa-contatos'
+import type { EmpresaEncontrada } from '../../../shared/types/api'
 
 /**
- * Busca de clientes da Gaulke para "Referente a" (assinatura e afins): as
- * empresas de `company` e as pessoas de `client`, por nome, fantasia ou
- * CPF/CNPJ.
+ * Busca de clientes da Gaulke para "Referente a" (assinatura e afins) e
+ * para escolher destinatarios: as empresas de `company`, as pessoas de
+ * `client` e, por ultimo, quem so aparece no historico de envios — por nome,
+ * fantasia, e-mail ou CPF/CNPJ. Cada resultado traz os e-mails que ja
+ * receberam por aquele documento (sys_mail_empresa_contatos).
  *
  * SOMENTE LEITURA e com SQL puro: as tabelas sao de outro sistema e nao
  * entram no schema deste (veja pessoas.get.ts).
  */
-export type EmpresaEncontrada = {
-  nome: string
-  fantasia: string | null
-  documento: string | null
-  tipo: 'empresa' | 'pessoa'
-  ativo: boolean
-}
-
 export default defineEventHandler(async (event): Promise<EmpresaEncontrada[]> => {
   const busca = String(getQuery(event).busca || '').trim()
   if (busca.length < 2) return []
@@ -50,13 +46,29 @@ export default defineEventHandler(async (event): Promise<EmpresaEncontrada[]> =>
     const doc = so(e.doc)
     if (doc && vistos.has(doc)) continue
     if (doc) vistos.add(doc)
-    saida.push({ nome: e.nome, fantasia: e.fantasia && e.fantasia !== e.nome ? e.fantasia : null, documento: doc, tipo: 'empresa', ativo: e.ativo ?? true })
+    saida.push({ nome: e.nome, fantasia: e.fantasia && e.fantasia !== e.nome ? e.fantasia : null, documento: doc, tipo: 'empresa', ativo: e.ativo ?? true, origem: 'cadastro', emails: [] })
   }
   for (const p of pessoas) {
     const doc = so(p.doc)
     if (doc && vistos.has(doc)) continue
     if (doc) vistos.add(doc)
-    saida.push({ nome: p.nome, fantasia: null, documento: doc, tipo: doc?.length === 14 ? 'empresa' : 'pessoa', ativo: p.ativo ?? true })
+    saida.push({ nome: p.nome, fantasia: null, documento: doc, tipo: doc?.length === 14 ? 'empresa' : 'pessoa', ativo: p.ativo ?? true, origem: 'cadastro', emails: [] })
   }
+  for (const h of await empresasDoHistorico(termo, porDoc)) {
+    if (vistos.has(h.documento)) continue
+    vistos.add(h.documento)
+    saida.push({
+      nome: h.empresa || h.nome || formatarDocumento(h.documento),
+      fantasia: null,
+      documento: h.documento,
+      tipo: h.documento.length === 14 ? 'empresa' : 'pessoa',
+      ativo: true,
+      origem: 'historico',
+      emails: []
+    })
+  }
+
+  const contatos = await contatosDasEmpresas(saida.map(e => e.documento).filter((d): d is string => !!d))
+  for (const e of saida) if (e.documento) e.emails = contatos.get(e.documento) ?? []
   return saida
 })

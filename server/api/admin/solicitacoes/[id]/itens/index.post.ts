@@ -21,7 +21,7 @@ export default defineEventHandler(async event => {
     .from(solicItens)
     .where(eq(solicItens.solicId, s.id))
   const [item] = await db.insert(solicItens).values({ ...d, solicId: s.id, ordem: proxima }).returning()
-  await registrarEventoSolic(s.id, 'item_incluido', `Incluiu o documento "${d.titulo}"${d.obrigatorio ? '' : ' (opcional)'}`, {
+  await registrarEventoSolic(s.id, 'item_incluido', `Incluiu o item "${d.titulo}"${d.obrigatorio ? '' : ' (opcional)'}`, {
     itemId: item!.id,
     porNome: op.nome
   })

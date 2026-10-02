@@ -7,7 +7,9 @@ import { useDb, solicItens, solicArquivos } from '../../../../db'
 import { auditar } from '../../../../utils/auditoria'
 import { carregarSolicitacao } from '../../../../utils/solicitacoes'
 import { caminhoDocumento, codigoSolicitacao, disposicao, slugPasta } from '../../../../utils/documentos'
+import { csvDaSolicitacao } from '../../../../utils/respostas-csv'
 import { ROTULO_STATUS_ITEM } from '../../../../../shared/utils/solicitacao'
+import { rotuloTipoItem } from '../../../../../shared/utils/itens-solic'
 import type { StatusItemSolicitacao } from '../../../../../shared/types/api'
 
 /**
@@ -18,6 +20,7 @@ import type { StatusItemSolicitacao } from '../../../../../shared/types/api'
  *
  * Streaming e sem compressao (PDF e foto ja vem comprimidos): 300 MB de
  * documentos nao passam pela memoria de uma vez. `?itens=1,2` baixa so esses.
+ * As respostas (itens que nao sao documento) vao no MANIFESTO e em RESPOSTAS.csv.
  */
 export default defineEventHandler(async event => {
   const s = await carregarSolicitacao(Number(getRouterParam(event, 'id')))
@@ -42,8 +45,9 @@ export default defineEventHandler(async event => {
       )
     )
     .orderBy(asc(solicArquivos.enviadoEm))
-  if (!arquivos.some(a => itens.some(i => i.id === a.itemId))) {
-    throw createError({ statusCode: 404, statusMessage: 'Ainda não há arquivo liberado para baixar' })
+  const temResposta = itens.some(i => i.tipo !== 'documento' && i.resposta)
+  if (!temResposta && !arquivos.some(a => itens.some(i => i.id === a.itemId))) {
+    throw createError({ statusCode: 404, statusMessage: 'Ainda não há arquivo nem resposta para baixar' })
   }
 
   const codigo = codigoSolicitacao(s)
@@ -64,10 +68,23 @@ export default defineEventHandler(async event => {
   void (async () => {
     try {
       for (const item of itens) {
+        if (item.tipo === 'informativo') continue
         const pasta = `${String(item.ordem).padStart(2, '0')}-${slugPasta(item.titulo, 40)}`
         const doItem = arquivos.filter(a => a.itemId === item.id)
         manifesto.push(`[${ROTULO_STATUS_ITEM[item.status as StatusItemSolicitacao] ?? item.status}] ${item.titulo}${item.obrigatorio ? '' : ' (opcional)'}`)
         if (item.motivo) manifesto.push(`    ${item.status === 'nao_possui' ? 'Justificativa do cliente' : 'Motivo'}: ${item.motivo}`)
+        if (item.tipo !== 'documento') {
+          manifesto.push(`    Tipo: ${rotuloTipoItem(item.tipo)}`)
+          if (item.resposta) {
+            manifesto.push(`    Resposta: ${item.resposta.exibicao}`)
+            manifesto.push(`    Respondido em ${formatarDataHora(item.respondidoEm)}${item.respostaIp ? ` · IP ${item.respostaIp}` : ''}`)
+            if (item.tipo === 'declaracao') {
+              manifesto.push(`    Texto aceito: ${item.config.texto ?? ''}`)
+              manifesto.push(`    SHA-256 do texto: ${item.resposta.declaracaoSha256 ?? '-'}`)
+              if (item.respostaUserAgent) manifesto.push(`    Navegador: ${item.respostaUserAgent}`)
+            }
+          } else manifesto.push('    Sem resposta')
+        }
         if (item.analisadoPorNome) manifesto.push(`    Analisado por ${item.analisadoPorNome} em ${formatarDataHora(item.analisadoEm)}`)
         const usados = new Set<string>()
         for (const a of doItem) {
@@ -93,6 +110,11 @@ export default defineEventHandler(async event => {
           manifesto.push(`    ${nome} · ${a.tamanho} bytes · enviado em ${formatarDataHora(a.enviadoEm)} · SHA-256 ${a.sha256}`)
         }
         manifesto.push('')
+      }
+      if (temResposta) {
+        const r = new ZipPassThrough('RESPOSTAS.csv')
+        zip.add(r)
+        r.push(new TextEncoder().encode(csvDaSolicitacao(s, itens)), true)
       }
       const m = new ZipPassThrough('MANIFESTO.txt')
       zip.add(m)

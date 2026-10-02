@@ -15,9 +15,10 @@ const schema = z.object({
 
 /**
  * Analise de um item:
- *   aprovar   o arquivo enviado serve
+ *   aprovar   o arquivo enviado (ou a resposta) serve
  *   aceitar   o cliente disse "nao possuo" e a justificativa basta
- *   recusar   precisa de novo envio (motivo obrigatorio: vai para o cliente)
+ *   recusar   precisa de novo envio (motivo obrigatorio: vai para o cliente);
+ *             numa resposta, ela fica para o cliente ver o que corrigir
  *   desfazer  volta o item a como o cliente deixou
  */
 export default defineEventHandler(async event => {
@@ -32,6 +33,7 @@ export default defineEventHandler(async event => {
   }
   const [item] = await db.select().from(solicItens).where(and(eq(solicItens.id, itemId), eq(solicItens.solicId, s.id)))
   if (!item) throw createError({ statusCode: 404, statusMessage: 'Item não encontrado' })
+  if (item.tipo === 'informativo') throw createError({ statusCode: 409, statusMessage: 'Este item é só um texto para leitura.' })
 
   const ativos = await db
     .select()
@@ -41,13 +43,16 @@ export default defineEventHandler(async event => {
   const agora = new Date()
   let descricao = ''
 
+  const ehDocumento = item.tipo === 'documento'
+
   if (d.acao === 'aprovar') {
-    if (!liberados.length) throw createError({ statusCode: 409, statusMessage: 'Não há arquivo liberado neste item para aprovar.' })
+    if (ehDocumento && !liberados.length) throw createError({ statusCode: 409, statusMessage: 'Não há arquivo liberado neste item para aprovar.' })
+    if (!ehDocumento && !item.resposta) throw createError({ statusCode: 409, statusMessage: 'O cliente ainda não respondeu este item.' })
     await db
       .update(solicItens)
       .set({ status: 'aprovado', motivo: null, analisadoEm: agora, analisadoPorNome: op.nome })
       .where(eq(solicItens.id, item.id))
-    descricao = `Aprovou "${item.titulo}" (${liberados.length} arquivo(s))`
+    descricao = ehDocumento ? `Aprovou "${item.titulo}" (${liberados.length} arquivo(s))` : `Aprovou a resposta de "${item.titulo}"`
   } else if (d.acao === 'aceitar') {
     if (item.status !== 'nao_possui') throw createError({ statusCode: 409, statusMessage: 'O cliente não marcou "não possuo" neste item.' })
     await db.update(solicItens).set({ analisadoEm: agora, analisadoPorNome: op.nome }).where(eq(solicItens.id, item.id))
@@ -68,7 +73,8 @@ export default defineEventHandler(async event => {
     }
     descricao = `Recusou "${item.titulo}": ${motivo}${d.descartarArquivos && ativos.length ? ` (${ativos.length} arquivo(s) descartado(s))` : ''}`
   } else {
-    const volta = item.status === 'nao_possui' ? 'nao_possui' : liberados.length ? 'enviado' : 'pendente'
+    const entregue = ehDocumento ? liberados.length > 0 : !!item.resposta
+    const volta = item.status === 'nao_possui' ? 'nao_possui' : entregue ? 'enviado' : 'pendente'
     await db
       .update(solicItens)
       .set({

@@ -10,7 +10,7 @@ export const checklistSchema = z.object({
   descricao: z.string().trim().max(1000).nullish().transform(v => v || null),
   // setor que ve o modelo; null = todos, ausente = o de quem salva
   departamentoId: z.number().int().positive().nullish(),
-  itens: z.array(itemSolicSchema).min(1, 'Inclua pelo menos um documento').max(40)
+  itens: z.array(itemSolicSchema).min(1, 'Inclua pelo menos um item').max(40)
 })
 
 export type DadosChecklist = z.output<typeof checklistSchema>

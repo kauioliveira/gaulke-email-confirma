@@ -28,6 +28,8 @@ const LIMITES = {
   // 30 fotos de nota de uma vez), mas cada uma e um upload de ate 25 MB
   solicUpload: num(process.env.RATE_LIMIT_SOLIC_UPLOAD, 40),
   solicAcao: num(process.env.RATE_LIMIT_SOLIC_ACAO, 30),
+  // respostas: a pagina salva sozinha enquanto o cliente digita (em lote, com espera)
+  solicResposta: num(process.env.RATE_LIMIT_SOLIC_RESPOSTA, 60),
   // assinatura: pedir codigo e assinar sao raros; validar e publico e sem token
   assinAcao: num(process.env.RATE_LIMIT_ASSIN_ACAO, 12),
   validar: num(process.env.RATE_LIMIT_VALIDAR, 20),
@@ -122,9 +124,10 @@ export default defineEventHandler(event => {
       return
     }
     const upload = metodo === 'POST' && path.endsWith('/arquivos')
+    const resposta = metodo === 'PUT' && path.endsWith('/respostas')
     const r = consumir(
-      chave(upload ? 'solic-upload' : 'solic-acao', ip, token),
-      upload ? LIMITES.solicUpload : LIMITES.solicAcao,
+      chave(upload ? 'solic-upload' : resposta ? 'solic-resposta' : 'solic-acao', ip, token),
+      upload ? LIMITES.solicUpload : resposta ? LIMITES.solicResposta : LIMITES.solicAcao,
       MINUTO
     )
     if (!r.permitido) recusar(event, r.resetEmMs)

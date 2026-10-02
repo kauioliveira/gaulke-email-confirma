@@ -604,7 +604,65 @@ export type StatusSolicitacao = 'aberta' | 'em_analise' | 'concluida' | 'cancela
 export type StatusItemSolicitacao = 'pendente' | 'enviado' | 'aprovado' | 'recusado' | 'nao_possui'
 export type StatusAntivirus = 'pendente' | 'limpo' | 'infectado' | 'sem_antivirus' | 'erro'
 
+/** documento = envio de arquivo; os demais o cliente responde na pagina (shared/utils/itens-solic.ts) */
+export type TipoItemSolic =
+  | 'documento'
+  | 'texto_curto'
+  | 'texto_longo'
+  | 'escolha'
+  | 'email'
+  | 'telefone'
+  | 'cpf_cnpj'
+  | 'data'
+  | 'numero'
+  | 'moeda'
+  | 'declaracao'
+  | 'informativo'
+
+/** Configuracao por tipo. So os campos do tipo sao gravados (normalizarConfig). */
+export interface ConfigItem {
+  /** false = a resposta e aprovada sozinha, sem conferencia da equipe */
+  conferir?: boolean
+  /** texto */
+  maxLen?: number
+  placeholder?: string
+  /** escolha */
+  opcoes?: string[]
+  multipla?: boolean
+  outro?: boolean
+  minEscolhas?: number
+  maxEscolhas?: number
+  /** numero/moeda: numero; data: 'AAAA-MM-DD' */
+  min?: number | string
+  max?: number | string
+  casas?: number
+  naoFutura?: boolean
+  /** cpf_cnpj */
+  aceita?: 'cpf' | 'cnpj' | 'ambos'
+  /** declaracao e informativo */
+  texto?: string
+  /** informativo: como o texto aparece (padrao justificado, como nos comunicados) */
+  alinhamento?: 'justificado' | 'esquerda' | 'centro'
+  /** informativo: caixa colorida; ausente = texto corrido */
+  cor?: 'neutro' | 'atencao' | 'alerta'
+}
+
+/** Resposta do cliente a um item que nao e documento (jsonb). */
+export interface RespostaItem {
+  v: 1
+  /** texto; numero (moeda em centavos); data ISO; escolha: string ou string[]; declaracao: true */
+  valor: string | number | string[] | boolean
+  /** texto do "Outro" na escolha */
+  outro?: string
+  /** pronto para mostrar ("R$ 1.234,56", "02/10/2026") */
+  exibicao: string
+  /** declaracao: sha-256 do texto aceito, para provar o que foi lido */
+  declaracaoSha256?: string
+}
+
 export interface ItemModeloChecklist {
+  tipo: TipoItemSolic
+  config: ConfigItem
   titulo: string
   instrucao: string | null
   obrigatorio: boolean
@@ -645,6 +703,11 @@ export interface ArquivoSolicitacao {
 export interface ItemSolicitacao {
   id: number
   ordem: number
+  tipo: TipoItemSolic
+  config: ConfigItem
+  resposta: RespostaItem | null
+  respondidoEm: string | null
+  respostaIp: string | null
   titulo: string
   instrucao: string | null
   obrigatorio: boolean
@@ -730,6 +793,10 @@ export interface LandingSolicitacao {
   status: StatusSolicitacao
   itens: {
     id: number
+    tipo: TipoItemSolic
+    config: ConfigItem
+    resposta: RespostaItem | null
+    respondidoEm: string | null
     titulo: string
     instrucao: string | null
     obrigatorio: boolean
@@ -742,6 +809,50 @@ export interface LandingSolicitacao {
     analisado: boolean
     arquivos: { id: number; nome: string; tamanho: number; enviadoEm: string; antivirus: StatusAntivirus }[]
   }[]
+}
+
+/**
+ * Um destinatario escolhido na tela (SeletorDestinatarios): lote e
+ * solicitacao montam a lista do mesmo jeito. A chave do carrinho e o e-mail
+ * em minusculas.
+ */
+/** De onde o SeletorDestinatarios pode trazer gente. */
+export type OrigemDestinatario = 'empresa' | 'arquivo' | 'lista' | 'banco' | 'manual' | 'sistema'
+
+export interface ItemDestinatario {
+  email: string
+  nome: string
+  empresa: string
+  /** CPF/CNPJ so com digitos (ou vazio) */
+  documento: string
+  /** de onde veio: "arquivo", "empresa", "lista: Clientes"... */
+  origem: string
+  /** colunas a mais da planilha, usadas como variaveis no e-mail do lote */
+  extras: Record<string, string>
+}
+
+/** E-mail conhecido de uma empresa (sys_mail_empresa_contatos), aprendido com os envios. */
+export interface ContatoEmpresa {
+  id: number
+  email: string
+  nome: string | null
+  usos: number
+  ultimoUso: string
+  /** devolveu definitivamente: nao adianta mandar */
+  suprimido: boolean
+}
+
+/** Resultado da busca de clientes (company, client e o historico de envios). */
+export interface EmpresaEncontrada {
+  nome: string
+  fantasia: string | null
+  documento: string | null
+  tipo: 'empresa' | 'pessoa'
+  ativo: boolean
+  /** de onde veio: o cadastro da Gaulke ou so o historico de envios */
+  origem: 'cadastro' | 'historico'
+  /** e-mails que ja receberam por este documento, o mais recente primeiro */
+  emails: ContatoEmpresa[]
 }
 
 /* -------------------------------------------------------------------------

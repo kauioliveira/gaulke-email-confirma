@@ -17,6 +17,7 @@ import {
   index,
   uniqueIndex
 } from 'drizzle-orm/pg-core'
+import type { ConfigItem, RespostaItem, TipoItemSolic } from '../../shared/types/api'
 
 /**
  * Todas as tabelas deste sistema usam o prefixo `sys_mail_` para nao se
@@ -452,6 +453,9 @@ export const checklistItens = pgTable('sys_mail_checklist_itens', {
     .notNull()
     .references(() => checklists.id, { onDelete: 'cascade' }),
   ordem: integer('ordem').default(0).notNull(),
+  // documento | texto_curto | escolha... (migration 0018; regras em shared/utils/itens-solic.ts)
+  tipo: varchar('tipo', { length: 20 }).$type<TipoItemSolic>().default('documento').notNull(),
+  config: jsonb('config').$type<ConfigItem>().default({}).notNull(),
   titulo: varchar('titulo', { length: 200 }).notNull(),
   instrucao: text('instrucao'),
   obrigatorio: boolean('obrigatorio').default(true).notNull(),
@@ -511,6 +515,9 @@ export const solicItens = pgTable('sys_mail_solic_itens', {
     .notNull()
     .references(() => solicitacoes.id, { onDelete: 'cascade' }),
   ordem: integer('ordem').default(0).notNull(),
+  // documento | texto_curto | escolha... (migration 0018; regras em shared/utils/itens-solic.ts)
+  tipo: varchar('tipo', { length: 20 }).$type<TipoItemSolic>().default('documento').notNull(),
+  config: jsonb('config').$type<ConfigItem>().default({}).notNull(),
   titulo: varchar('titulo', { length: 200 }).notNull(),
   instrucao: text('instrucao'),
   obrigatorio: boolean('obrigatorio').default(true).notNull(),
@@ -522,7 +529,12 @@ export const solicItens = pgTable('sys_mail_solic_itens', {
   motivo: text('motivo'),
   analisadoPorNome: varchar('analisado_por_nome', { length: 255 }),
   analisadoEm: timestamp('analisado_em', { withTimezone: true }),
-  recusaAvisadaEm: timestamp('recusa_avisada_em', { withTimezone: true })
+  recusaAvisadaEm: timestamp('recusa_avisada_em', { withTimezone: true }),
+  // resposta do cliente aos itens que nao sao documento
+  resposta: jsonb('resposta').$type<RespostaItem | null>(),
+  respondidoEm: timestamp('respondido_em', { withTimezone: true }),
+  respostaIp: varchar('resposta_ip', { length: 64 }),
+  respostaUserAgent: text('resposta_user_agent')
 })
 
 export const solicArquivos = pgTable('sys_mail_solic_arquivos', {
@@ -775,6 +787,28 @@ export type ReenvioPendente = {
 }
 export type MailEvent = typeof events.$inferSelect
 export type Auditoria = typeof auditoria.$inferSelect
+/**
+ * Qual e-mail recebe por CPF/CNPJ (migration 0019). A tabela company nao tem
+ * e-mail; este cadastro aprende com os envios e sugere na hora de escolher a
+ * empresa.
+ */
+export const empresaContatos = pgTable(
+  'sys_mail_empresa_contatos',
+  {
+    id: serial('id').primaryKey(),
+    documento: varchar('documento', { length: 14 }).notNull(),
+    email: varchar('email', { length: 320 }).notNull(),
+    nome: varchar('nome', { length: 200 }),
+    empresa: varchar('empresa', { length: 200 }),
+    origem: varchar('origem', { length: 20 }).notNull(),
+    usos: integer('usos').default(1).notNull(),
+    primeiroUso: timestamp('primeiro_uso', { withTimezone: true }).defaultNow().notNull(),
+    ultimoUso: timestamp('ultimo_uso', { withTimezone: true }).defaultNow().notNull(),
+    removidoEm: timestamp('removido_em', { withTimezone: true })
+  },
+  t => [uniqueIndex('sys_mail_empresa_contatos_doc_email_idx').on(t.documento, t.email)]
+)
+
 export type Solicitacao = typeof solicitacoes.$inferSelect
 export type SolicItem = typeof solicItens.$inferSelect
 export type SolicArquivo = typeof solicArquivos.$inferSelect
