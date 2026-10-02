@@ -87,6 +87,10 @@ watch(contasAtivas, cs => {
 const contaEscolhida = computed(() => contasAtivas.value.find(c => c.id === contaId.value) || null)
 const itensConta = computed(() => contasAtivas.value.map(c => ({ label: c.padrao ? `${c.nome} (padrão)` : c.nome, value: c.id })))
 
+// chamado no painel quando o cliente responder o e-mail: o padrao vem do canal
+const criarTickets = ref(false)
+watch(contaEscolhida, c => { criarTickets.value = !!c?.criarTickets }, { immediate: true })
+
 /**
  * Respostas para: numa solicitação o cliente costuma responder com dúvida
  * sobre um documento — faz sentido cair com quem pediu. Por isso o padrão é o
@@ -110,6 +114,13 @@ const responderPara = computed(() =>
   respostaModo.value === 'meu' ? meuEmail.value : respostaModo.value === 'outro' ? respostaOutro.value.trim() || null : null
 )
 const emailValido = (e: string) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(e.trim())
+/** o endereco de resposta e de algum canal com a caixa monitorada? (senao, nada vira chamado) */
+const caixaNaoMonitorada = computed(() => {
+  const so = (e: string) => e.replace(/.*</, '').replace(/>.*/, '').trim().toLowerCase()
+  const destino = so(responderPara.value || contaEscolhida.value?.responderPara || contaEscolhida.value?.remetente || '')
+  if (!destino) return false
+  return !contasAtivas.value.some(c => c.monitorarCaixa && [c.remetente, c.responderPara ?? ''].some(e => so(e) === destino))
+})
 const respostaInvalida = computed(() => respostaModo.value === 'outro' && !emailValido(respostaOutro.value))
 
 const hoje = dataSP()
@@ -195,6 +206,7 @@ async function enviar() {
         prazo: prazo.value || null,
         lembretes: lembretes.value,
         avisarConclusao: avisarConclusao.value,
+        criarTickets: criarTickets.value,
         contaId: contaId.value || null,
         responderPara: responderPara.value,
         itens: itens.value,
@@ -340,8 +352,20 @@ async function enviar() {
           <div class="space-y-3 pt-1">
             <USwitch v-model="lembretes" label="Lembretes automáticos" description="A cada 3 dias sem entrega, até 3 vezes, em dia útil." />
             <USwitch v-model="avisarConclusao" label="Avisar o cliente ao concluir" description="“Recebemos tudo, obrigado.”" />
+            <USwitch
+              v-model="criarTickets"
+              label="Abrir chamado no painel quando o cliente responder"
+              description="Cada resposta por e-mail vira um chamado em seu nome; uma nova resposta com o chamado ainda aberto entra como comentário."
+            />
           </div>
         </div>
+        <UAlert
+          v-if="criarTickets && caixaNaoMonitorada"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-inbox"
+          description="As respostas vão para uma caixa que o sistema não monitora: o cliente pode responder, mas o sistema não vê e o chamado não abre. Em “Respostas para”, escolha a caixa do canal (com monitoramento ligado)."
+        />
       </div>
       <div class="space-y-4 lg:col-span-2">
         <UFormField label="Sai por (canal)" :help="contaEscolhida ? `De ${contaEscolhida.remetente}` : 'Nenhum canal: usa o SMTP do .env.'">

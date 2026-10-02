@@ -1,7 +1,7 @@
 import { sessaoValida } from '../../utils/auth'
 import { temCookieDoPainel, usuarioDaSessaoPainel } from '../../utils/sessao-painel'
 import { papelDe, OPERADOR_SENHA_LOCAL } from '../../utils/permissoes'
-import { lerConfig } from '../../utils/config'
+import { acessoEmergenciaLiberado } from '../../utils/env'
 
 /**
  * Estado da autenticacao, para a tela decidir o que mostrar.
@@ -12,7 +12,8 @@ import { lerConfig } from '../../utils/config'
  * exigirPapel(). `senhaLocal` diz se o formulario de senha deve aparecer.
  */
 export default defineEventHandler(async event => {
-  const senhaLocal = await lerConfig('senha_local_habilitada')
+  // liberado por ambiente (.env: ACESSO_EMERGENCIA)
+  const senhaLocal = acessoEmergenciaLiberado()
   const usuario = await usuarioDaSessaoPainel(event)
 
   if (usuario) {

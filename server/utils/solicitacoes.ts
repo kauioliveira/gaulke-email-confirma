@@ -130,6 +130,8 @@ export const criarSolicSchema = z.object({
     .refine(v => !v || v >= dataSP(), 'O prazo nao pode estar no passado'),
   lembretes: z.boolean().default(true),
   avisarConclusao: z.boolean().default(true),
+  /** ausente = o padrao do canal */
+  criarTickets: z.boolean().optional(),
   contaId: z.number().int().positive().nullish(),
   responderPara: z.string().trim().max(300).nullish().transform(v => v || null),
   itens: z.array(itemSolicSchema).min(1, 'Inclua pelo menos um item').max(40),

@@ -1,7 +1,7 @@
 import { sessaoValida } from '../utils/auth'
 import { temCookieDoPainel, usuarioDaSessaoPainel } from '../utils/sessao-painel'
 import { operadorDoPainel, OPERADOR_SENHA_LOCAL } from '../utils/permissoes'
-import { lerConfig } from '../utils/config'
+import { acessoEmergenciaLiberado } from '../utils/env'
 
 /**
  * Protege as APIs administrativas e identifica QUEM esta operando.
@@ -33,12 +33,12 @@ export default defineEventHandler(async event => {
   }
 
   if (sessaoValida(event)) {
-    // desligar a senha pela tela derruba tambem quem ja estava dentro por ela,
-    // e nao so os logins novos — senao "desligar" levaria ate 12h para valer
-    if (!(await lerConfig('senha_local_habilitada'))) {
+    // ambiente sem acesso de emergencia (producao): nem uma sessao antiga
+    // aberta pela senha passa — vale a cada requisicao, nao so no login
+    if (!acessoEmergenciaLiberado()) {
       throw createError({
         statusCode: 401,
-        statusMessage: 'O acesso por senha local foi desligado. Entre pelo painel.'
+        statusMessage: 'O acesso por senha local não está disponível neste ambiente. Entre pelo painel.'
       })
     }
     event.context.operador = OPERADOR_SENHA_LOCAL

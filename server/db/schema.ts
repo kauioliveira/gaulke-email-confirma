@@ -401,6 +401,8 @@ export const ticketsPainel = pgTable('sys_mail_tickets', {
   batchId: integer('batch_id').references(() => batches.id, { onDelete: 'cascade' }),
   recipientId: integer('recipient_id').references(() => recipients.id, { onDelete: 'cascade' }),
   inboundId: bigint('inbound_id', { mode: 'number' }).references(() => inbound.id, { onDelete: 'set null' }),
+  // chamado de resposta a uma solicitacao (migration 0020); FK no SQL
+  solicId: integer('solic_id'),
   solicitanteUserId: integer('solicitante_user_id'),
   titulo: varchar('titulo', { length: 255 }).notNull(),
   descricao: text('descricao').notNull(),
@@ -488,6 +490,8 @@ export const solicitacoes = pgTable('sys_mail_solic', {
   lembretesEnviados: integer('lembretes_enviados').default(0).notNull(),
   ultimoLembreteEm: timestamp('ultimo_lembrete_em', { withTimezone: true }),
   avisarConclusao: boolean('avisar_conclusao').default(true).notNull(),
+  // resposta do cliente por e-mail abre chamado no painel (migration 0020)
+  criarTickets: boolean('criar_tickets').default(false).notNull(),
   messageId: text('message_id'),
   envioErro: text('envio_erro'),
   primeiroAcessoEm: timestamp('primeiro_acesso_em', { withTimezone: true }),

@@ -32,10 +32,13 @@ export default defineEventHandler(async event => {
   }
 
   let contaNome: string | null = null
+  // chamado no painel: o que veio da tela; sem escolha, o padrao do canal
+  let criarTickets = d.criarTickets ?? false
   if (d.contaId) {
     const [c] = await db.select().from(accounts).where(eq(accounts.id, d.contaId))
     if (!c || c.ativa !== 'true') throw createError({ statusCode: 400, statusMessage: 'O canal escolhido não existe ou está desativado' })
     contaNome = c.nome
+    if (d.criarTickets === undefined) criarTickets = c.criarTickets
   }
 
   const grupo = destinatarios.length > 1 ? randomUUID() : null
@@ -71,6 +74,7 @@ export default defineEventHandler(async event => {
           responderPara: d.responderPara,
           lembretes: d.lembretes,
           avisarConclusao: d.avisarConclusao,
+          criarTickets,
           criadoPorUserId: op.id,
           criadoPorNome: op.nome,
           criadoPorEmail: op.email,

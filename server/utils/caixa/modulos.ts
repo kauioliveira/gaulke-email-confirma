@@ -3,6 +3,8 @@ import { useDb, solicitacoes, assinDocumentos, assinSignatarios, type Account, t
 import type { ResultadoClassificacao, PistasModulos } from './classificar'
 import { suprimir } from '../supressao'
 import { registrarEventoSolic, avisarEquipe, webhookSolicitacao } from '../solicitacoes'
+import { enfileirarRespostaSolic } from '../painel-tickets'
+import { codigoSolicitacao } from '../documentos'
 import { registrarEventoAssin, avisarQuemPediu } from '../assinatura'
 
 /**
@@ -105,7 +107,7 @@ export async function aplicarEfeitoModulo(
   v: VinculoModulo,
   r: ResultadoClassificacao,
   conta: Account,
-  msg: { inboundId: number; de: string | null; assunto: string | null }
+  msg: { inboundId: number; de: string | null; assunto: string | null; recebidoEm?: Date | null }
 ) {
   const trecho = r.trecho?.slice(0, 1500) ?? null
   const motivo = [r.status, r.diagnostico].filter(Boolean).join(' — ') || 'devolução definitiva'
@@ -127,6 +129,17 @@ export async function aplicarEfeitoModulo(
           )
         }
         await webhookSolicitacao('solicitacao.respondida', s, { de: msg.de, assunto: msg.assunto, trecho })
+        if (s.criarTickets) {
+          await enfileirarRespostaSolic({
+            solic: s,
+            codigo: codigoSolicitacao(s),
+            inboundId: msg.inboundId,
+            de: msg.de,
+            assunto: msg.assunto,
+            recebidoEm: msg.recebidoEm ?? null,
+            trecho: r.trecho ?? null
+          })
+        }
         break
       case 'devolucao_definitiva': {
         const falho = r.pistas.destinatarioFalho ?? s.destinatarioEmail

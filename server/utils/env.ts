@@ -6,6 +6,15 @@
  * com as aspas. Como o mesmo .env costuma servir os dois casos, normalizamos
  * na leitura em vez de depender de quem escreveu o arquivo.
  */
+/**
+ * Acesso de emergencia pela senha local (decisao D3), ligado POR AMBIENTE:
+ * ACESSO_EMERGENCIA=true no .env de desenvolvimento, false no .env.production.
+ * Ausente ou qualquer outro valor = desligado (o lado seguro).
+ */
+export function acessoEmergenciaLiberado() {
+  return /^(1|true|sim|on)$/i.test(semAspas(process.env.ACESSO_EMERGENCIA))
+}
+
 export function semAspas(valor: string | undefined | null) {
   if (!valor) return ''
   const v = String(valor).trim()

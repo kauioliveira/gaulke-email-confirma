@@ -120,7 +120,7 @@ export async function processarMensagem(
 
   if (!linha) return { novo: false, classificacao: r.classificacao, vinculado: !!(v || vm) }
   if (v) await aplicarEfeito(v, r, linha.id, { de, assunto: m.subject ?? null, recebidoEm: m.date ?? null })
-  if (vm) await aplicarEfeitoModulo(vm, r, conta, { inboundId: linha.id, de, assunto: m.subject ?? null })
+  if (vm) await aplicarEfeitoModulo(vm, r, conta, { inboundId: linha.id, de, assunto: m.subject ?? null, recebidoEm: m.date ?? null })
   return { novo: true, classificacao: r.classificacao, vinculado: !!(v || vm) }
 }
 

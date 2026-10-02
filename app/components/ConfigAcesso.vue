@@ -2,40 +2,12 @@
 /**
  * Configurações de acesso (só admin).
  *
- * Hoje só a senha local de emergência. Desligá-la derruba também quem já está
- * dentro por ela — o servidor confere a configuração a cada requisição.
+ * O acesso de emergência pela senha local é decidido POR AMBIENTE, no .env
+ * (ACESSO_EMERGENCIA): ligado no desenvolvimento, desligado em produção. A
+ * tela só mostra o estado — mudar é trocar o .env e reiniciar.
  */
-const toast = useToast()
 const { sessao } = usePapel()
-const { data, refresh } = await useFetch<{ itens: ItemConfig[] }>(api('/api/admin/config'))
-
-const senhaLocal = computed(() => data.value?.itens.find(i => i.chave === 'senha_local_habilitada'))
-const salvando = ref(false)
-
-// quem entrou pela senha não pode desligá-la (o servidor também recusa)
-const entrouPelaSenha = computed(() => sessao.value?.origem === 'senha')
-
-async function alternarSenhaLocal(valor: boolean) {
-  salvando.value = true
-  try {
-    await $fetch(api('/api/admin/config'), {
-      method: 'PUT',
-      body: { chave: 'senha_local_habilitada', valor }
-    })
-    await refresh()
-    toast.add({
-      title: valor ? 'Acesso de emergência ligado' : 'Acesso de emergência desligado',
-      description: valor
-        ? 'A senha local volta a funcionar na tela de login.'
-        : 'Só é possível entrar pelo painel. Quem estava dentro pela senha foi desconectado.',
-      color: 'success'
-    })
-  } catch (e: any) {
-    toast.add({ title: 'Não foi possível alterar', description: e?.statusMessage, color: 'error' })
-  } finally {
-    salvando.value = false
-  }
-}
+const ligado = computed(() => sessao.value?.senhaLocal === true)
 </script>
 
 <template>
@@ -55,19 +27,17 @@ async function alternarSenhaLocal(valor: boolean) {
           Esse acesso não identifica a pessoa, opera como administrador e fica registrado na
           auditoria como “Acesso por senha local”.
         </p>
-        <p v-if="senhaLocal?.atualizadoPorNome" class="text-xs text-muted">
-          Última alteração por {{ senhaLocal.atualizadoPorNome }} em {{ formatarDataHora(senhaLocal.atualizadoEm) }}
-        </p>
-        <p v-if="entrouPelaSenha" class="text-xs text-warning">
-          Você entrou pela senha local: para desligá-la, entre pelo painel.
+        <p class="text-sm text-muted">
+          Definido por ambiente na variável <code>ACESSO_EMERGENCIA</code> do <code>.env</code>
+          (<code>true</code> no desenvolvimento, <code>false</code> em produção). Para mudar, altere o arquivo e reinicie o sistema.
         </p>
       </div>
-      <USwitch
-        :model-value="senhaLocal?.valor === true"
-        :loading="salvando"
-        :disabled="salvando || !senhaLocal || (entrouPelaSenha && senhaLocal?.valor === true)"
-        :label="senhaLocal?.valor === true ? 'Ligado' : 'Desligado'"
-        @update:model-value="v => alternarSenhaLocal(Boolean(v))"
+      <UBadge
+        :color="ligado ? 'warning' : 'success'"
+        variant="subtle"
+        size="lg"
+        :icon="ligado ? 'i-lucide-key-round' : 'i-lucide-lock'"
+        :label="ligado ? 'Ligado neste ambiente' : 'Desligado neste ambiente'"
       />
     </div>
   </UCard>

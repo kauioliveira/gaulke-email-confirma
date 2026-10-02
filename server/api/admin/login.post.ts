@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { criarSessao, senhaConfere } from '../../utils/auth'
 import { bloqueioRestante, registrarFalha, registrarSucesso } from '../../utils/login-guard'
-import { lerConfig } from '../../utils/config'
+import { acessoEmergenciaLiberado } from '../../utils/env'
 import { auditar } from '../../utils/auditoria'
 import { OPERADOR_SENHA_LOCAL } from '../../utils/permissoes'
 
@@ -12,13 +12,13 @@ const schema = z.object({ senha: z.string().min(1) })
  *
  * O caminho normal e a sessao do painel, que identifica a pessoa. Este existe
  * para quando o painel esta fora do ar, e por isso fica auditado (acertos e
- * erros) e pode ser desligado pelo admin em Configuracoes.
+ * erros) e so existe onde o .env deixa (ACESSO_EMERGENCIA; em producao, nao).
  */
 export default defineEventHandler(async event => {
-  if (!(await lerConfig('senha_local_habilitada'))) {
+  if (!acessoEmergenciaLiberado()) {
     throw createError({
       statusCode: 403,
-      statusMessage: 'O acesso por senha local foi desligado pelo administrador. Entre pelo painel.'
+      statusMessage: 'O acesso por senha local não está disponível neste ambiente. Entre pelo painel.'
     })
   }
 

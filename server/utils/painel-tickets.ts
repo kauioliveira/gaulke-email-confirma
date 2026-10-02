@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull, lte, ne, sql } from 'drizzle-orm'
-import { useDb, useSql, ticketsPainel, batches, recipients, type Batch, type Recipient } from '../db'
+import { useDb, useSql, ticketsPainel, batches, recipients, type Batch, type Recipient, type Solicitacao } from '../db'
 import { lerConfig } from './config'
 import { decifrar } from './cripto'
 import { semAspas } from './env'
@@ -127,6 +127,53 @@ export async function enfileirarResposta(o: {
 }
 
 /**
+ * Resposta do cliente ao e-mail de uma SOLICITACAO (com "criar chamado"
+ * ligado). Mesmo jeito do lote: um chamado por resposta, em nome de quem
+ * pediu; se o chamado anterior da mesma solicitacao ainda esta aberto, a nova
+ * resposta vira comentario nele.
+ */
+export async function enfileirarRespostaSolic(o: {
+  solic: Solicitacao
+  codigo: string
+  inboundId: number
+  de: string | null
+  assunto: string | null
+  recebidoEm: Date | null
+  trecho: string | null
+}) {
+  const s = o.solic
+  const quem = s.destinatarioNome || s.destinatarioEmail
+  const link = linkAdmin(`/admin/solicitacoes/${s.id}`)
+  const descricao = [
+    `${quem}${s.empresa ? ` (${s.empresa})` : ''} respondeu por e-mail à solicitação "${s.titulo}".`,
+    '',
+    `De: ${o.de ?? s.destinatarioEmail}`,
+    `Assunto: ${o.assunto ?? '—'}`,
+    `Recebida em: ${formatarDataHora(o.recebidoEm ?? new Date())} (Brasília)`,
+    `Código da solicitação: ${o.codigo}`,
+    '',
+    'Mensagem:',
+    o.trecho?.trim() || '(sem texto — veja a mensagem na caixa de e-mail)',
+    '',
+    link ? `Solicitação: ${link}` : ''
+  ].join('\n').trim()
+
+  await useDb()
+    .insert(ticketsPainel)
+    .values({
+      motivo: 'resposta',
+      solicId: s.id,
+      inboundId: o.inboundId,
+      solicitanteUserId: s.criadoPorUserId,
+      titulo: `Resposta de ${quem} — ${s.titulo}`.slice(0, 255),
+      descricao,
+      externalCode: `comunica:resposta:${o.inboundId}`,
+      externalUrl: link
+    })
+    .onConflictDoNothing()
+}
+
+/**
  * Lotes com "criar chamados" ligado, concluidos ha N dias (N do canal), em que
  * alguem recebeu e ainda nao confirmou. Um chamado por lote, uma vez so (o
  * indice unico do banco garante mesmo com duas instancias).
@@ -235,14 +282,15 @@ export async function processarFilaTickets() {
         let acao = t.acao
         let alvo = t.ticketUuid
 
-        // resposta: comenta no chamado aberto do MESMO destinatario, se houver
-        if (!acao && t.motivo === 'resposta' && t.recipientId) {
+        // resposta: comenta no chamado aberto do MESMO destinatario (lote) ou
+        // da MESMA solicitacao, se houver
+        if (!acao && t.motivo === 'resposta' && (t.recipientId || t.solicId)) {
           const [anterior] = await db
             .select({ uuid: ticketsPainel.ticketUuid })
             .from(ticketsPainel)
             .where(
               and(
-                eq(ticketsPainel.recipientId, t.recipientId),
+                t.recipientId ? eq(ticketsPainel.recipientId, t.recipientId) : eq(ticketsPainel.solicId, t.solicId!),
                 eq(ticketsPainel.motivo, 'resposta'),
                 isNotNull(ticketsPainel.ticketUuid),
                 ne(ticketsPainel.id, t.id)
@@ -282,7 +330,7 @@ export async function processarFilaTickets() {
             descricao: t.descricao,
             externalCode: t.externalCode,
             externalUrl: t.externalUrl ?? undefined,
-            metadata: { motivo: t.motivo, loteId: t.batchId, destinatarioId: t.recipientId }
+            metadata: { motivo: t.motivo, loteId: t.batchId, destinatarioId: t.recipientId, solicitacaoId: t.solicId }
           })
           await db
             .update(ticketsPainel)
@@ -291,7 +339,9 @@ export async function processarFilaTickets() {
               ticketUuid: r.ticket.uuid,
               ticketCode: r.ticket.code,
               statusEnvio: 'criado',
-              erro: r.solicitante.substituido ? `Aberto em nome de ${r.solicitante.nome}: quem criou o lote não pode mais agir no painel.` : null,
+              erro: r.solicitante.substituido
+                ? `Aberto em nome de ${r.solicitante.nome}: quem criou o ${t.solicId ? 'pedido' : 'lote'} não pode mais agir no painel.`
+                : null,
               atualizadoEm: new Date()
             })
             .where(eq(ticketsPainel.id, t.id))
