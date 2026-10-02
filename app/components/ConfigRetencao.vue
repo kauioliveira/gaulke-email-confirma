@@ -109,22 +109,22 @@ const LINK_TIPO: Record<string, string> = { lote: '/admin/lotes/', lixeira: '/ad
 
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" :class="!form.ativa && 'opacity-60'">
         <UFormField label="Comunicados" help="Lotes, destinatários, eventos. Também assinaturas não concluídas.">
-          <UInput v-model.number="form.comunicadosMeses" type="number" min="6" max="240" class="w-full" :disabled="!form.ativa">
+          <UInput v-model.number="form.comunicadosMeses" type="number" min="0" class="w-full" :disabled="!form.ativa">
             <template #trailing><span class="text-xs text-muted">meses</span></template>
           </UInput>
         </UFormField>
         <UFormField label="Solicitações" help="Pedidos de documentos e os arquivos enviados pelo cliente.">
-          <UInput v-model.number="form.solicitacoesMeses" type="number" min="6" max="240" class="w-full" :disabled="!form.ativa">
+          <UInput v-model.number="form.solicitacoesMeses" type="number" min="0" class="w-full" :disabled="!form.ativa">
             <template #trailing><span class="text-xs text-muted">meses</span></template>
           </UInput>
         </UFormField>
         <UFormField label="Assinados por todos" help="Contam da conclusão. Prova de contrato: prazo longo.">
-          <UInput v-model.number="form.assinadosAnos" type="number" min="5" max="30" class="w-full" :disabled="!form.ativa">
+          <UInput v-model.number="form.assinadosAnos" type="number" min="0" class="w-full" :disabled="!form.ativa">
             <template #trailing><span class="text-xs text-muted">anos</span></template>
           </UInput>
         </UFormField>
         <UFormField label="Lixeira" help="Lote excluído é apagado de vez depois disto.">
-          <UInput v-model.number="form.lixeiraDias" type="number" min="7" max="3650" class="w-full" :disabled="!form.ativa">
+          <UInput v-model.number="form.lixeiraDias" type="number" min="0" class="w-full" :disabled="!form.ativa">
             <template #trailing><span class="text-xs text-muted">dias</span></template>
           </UInput>
         </UFormField>

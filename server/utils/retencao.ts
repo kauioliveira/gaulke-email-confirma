@@ -37,10 +37,20 @@ const LOTE = 500
 const DIA_MS = 86_400_000
 const TRAVA_RETENCAO = 827011401
 
+// prazo 0 = nunca expurga. '-infinity' e aceito pelo Postgres (nada e menor
+// que ele) e, como texto, tambem perde na comparacao de anexosSoltos
+const NUNCA = '-infinity'
+
+// prazo tao longo que o corte cai antes do ano 1 (o Postgres nao aceita) = nunca
+function corte(d: Date) {
+  return Number.isNaN(d.getTime()) || d.getUTCFullYear() < 1 ? NUNCA : d.toISOString()
+}
+
 function menosMeses(meses: number, agora = new Date()) {
+  if (meses <= 0) return NUNCA
   const d = new Date(agora)
   d.setMonth(d.getMonth() - meses)
-  return d.toISOString()
+  return corte(d)
 }
 
 export function cortesRetencao(c: ConfigRetencao, agora = new Date()) {
@@ -48,7 +58,7 @@ export function cortesRetencao(c: ConfigRetencao, agora = new Date()) {
     comunicados: menosMeses(c.comunicadosMeses, agora),
     solicitacoes: menosMeses(c.solicitacoesMeses, agora),
     assinados: menosMeses(c.assinadosAnos * 12, agora),
-    lixeira: new Date(agora.getTime() - c.lixeiraDias * DIA_MS).toISOString()
+    lixeira: c.lixeiraDias <= 0 ? NUNCA : corte(new Date(agora.getTime() - c.lixeiraDias * DIA_MS))
   }
 }
 

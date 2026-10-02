@@ -5,10 +5,10 @@ import { executarRetencao } from '../../../utils/retencao'
 
 const schema = z
   .object({
-    comunicadosMeses: z.number().int().min(6).max(240),
-    solicitacoesMeses: z.number().int().min(6).max(240),
-    assinadosAnos: z.number().int().min(5).max(30),
-    lixeiraDias: z.number().int().min(7).max(3650)
+    comunicadosMeses: z.number().int().min(0),
+    solicitacoesMeses: z.number().int().min(0),
+    assinadosAnos: z.number().int().min(0),
+    lixeiraDias: z.number().int().min(0)
   })
   .partial()
 
