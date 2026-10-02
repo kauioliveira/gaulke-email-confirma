@@ -150,8 +150,10 @@ const pct = (s: ResumoSolicitacao) => (s.obrigatorios ? Math.round((s.obrigatori
               </td>
               <td class="max-w-[160px] truncate px-3 py-2 text-muted">{{ s.criadoPorNome || '—' }}</td>
               <td class="px-2 py-2 text-right" @click.stop>
-                <UTooltip v-if="podeExcluir(s)" text="Excluir definitivamente">
-                  <UButton icon="i-lucide-trash-2" color="error" variant="ghost" size="xs" :aria-label="`Excluir ${s.codigo}`" @click="abrirExclusao(s)" />
+                <UTooltip :text="podeExcluir(s) ? 'Excluir definitivamente' : `Só quem pediu (${s.criadoPorNome || '—'}), supervisores e administradores excluem`">
+                  <span class="inline-flex">
+                    <UButton icon="i-lucide-trash-2" color="error" variant="ghost" size="xs" :disabled="!podeExcluir(s)" :aria-label="`Excluir ${s.codigo}`" @click="abrirExclusao(s)" />
+                  </span>
                 </UTooltip>
               </td>
             </tr>

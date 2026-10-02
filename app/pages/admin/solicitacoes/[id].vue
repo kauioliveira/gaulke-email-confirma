@@ -28,6 +28,8 @@ onBeforeUnmount(() => clearInterval(timer))
 const encerrada = computed(() => s.value?.status === 'concluida' || s.value?.status === 'cancelada')
 const souQuemPediu = computed(() => !!sessao.value?.usuario?.id && s.value?.criadoPorUserId === sessao.value.usuario.id)
 const podeCancelar = computed(() => souQuemPediu.value || pode('supervisor'))
+// os botoes aparecem sempre; sem permissao ficam desligados e dizem por que
+const semPermissao = computed(() => `Só quem pediu (${s.value?.criadoPorNome || '—'}), supervisores e administradores.`)
 // excluir de vez: mesma regra de quem cancela (o servidor ainda exige supervisor se o cliente ja entregou)
 const modalExcluir = ref(false)
 async function aposExcluir() {
@@ -268,8 +270,15 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
         </UDropdownMenu>
         <UButton v-if="!encerrada" label="Concluir" icon="i-lucide-badge-check" color="success" variant="soft" @click="obsConclusao = ''; avisarNaConclusao = s.avisarConclusao; modalConcluir = true" />
         <UButton v-if="encerrada && (s.status === 'concluida' || podeCancelar)" label="Reabrir" icon="i-lucide-rotate-ccw" color="neutral" variant="outline" :loading="ocupado === 'reabrir'" @click="reabrir" />
-        <UTooltip v-if="podeCancelar" text="Excluir definitivamente">
-          <UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Excluir definitivamente" @click="modalExcluir = true" />
+        <UTooltip v-if="s.status !== 'cancelada'" :text="podeCancelar ? 'Encerra o pedido: o link do cliente para de funcionar e nada é apagado' : semPermissao">
+          <span class="inline-flex">
+            <UButton label="Cancelar" icon="i-lucide-ban" color="warning" variant="soft" :disabled="!podeCancelar" @click="motivoCancelar = ''; modalCancelar = true" />
+          </span>
+        </UTooltip>
+        <UTooltip :text="podeCancelar ? 'Apaga a solicitação e os arquivos de vez' : semPermissao">
+          <span class="inline-flex">
+            <UButton label="Excluir" icon="i-lucide-trash-2" color="error" variant="soft" :disabled="!podeCancelar" @click="modalExcluir = true" />
+          </span>
         </UTooltip>
       </div>
     </div>
@@ -521,7 +530,6 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
             <div class="flex flex-wrap gap-2">
               <UButton label="Reenviar pedido" icon="i-lucide-send" color="neutral" variant="outline" size="sm" @click="abrirReenvio" />
               <UButton v-if="faltaDoCliente" label="Enviar lembrete" icon="i-lucide-bell" color="neutral" variant="outline" size="sm" :loading="ocupado === 'lembrete'" @click="lembrar" />
-              <UButton v-if="!encerrada && podeCancelar" label="Cancelar" icon="i-lucide-ban" color="error" variant="ghost" size="sm" @click="motivoCancelar = ''; modalCancelar = true" />
             </div>
           </template>
         </UCard>
