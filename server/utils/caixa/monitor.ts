@@ -112,7 +112,7 @@ export async function lerCaixa(contaId: number): Promise<ResultadoLeitura> {
           if (!msg.source) continue
           r.lidas++
           try {
-            const p = await processarMensagem(conta, uidvalidity, msg.uid, await simpleParser(msg.source))
+            const p = await processarMensagem(conta, uidvalidity, msg.uid, await simpleParser(msg.source), msg.source)
             if (p.novo) {
               r.novas++
               r.porTipo[p.classificacao] = (r.porTipo[p.classificacao] ?? 0) + 1

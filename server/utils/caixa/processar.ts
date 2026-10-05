@@ -8,6 +8,7 @@ import { registrarEvento } from '../tracking'
 import { useBatchBus } from '../sse'
 import { suprimir } from '../supressao'
 import { enfileirarResposta } from '../painel-tickets'
+import { guardarMensagem } from './guardar'
 
 /**
  * O que fazer com cada mensagem lida da caixa: classificar, ligar ao envio e
@@ -71,7 +72,9 @@ export async function processarMensagem(
   conta: Account,
   uidvalidity: number,
   uid: number,
-  m: ParsedMail
+  m: ParsedMail,
+  /** o original como chegou: guardado (.eml) quando e resposta a um envio nosso */
+  fonte: Buffer | null = null
 ): Promise<Processada> {
   const db = useDb()
   const r = classificar(m)
@@ -119,6 +122,13 @@ export async function processarMensagem(
     .returning({ id: inbound.id })
 
   if (!linha) return { novo: false, classificacao: r.classificacao, vinculado: !!(v || vm) }
+  // resposta de gente a um envio nosso: guarda inteira (corpo, .eml e anexos)
+  // ANTES dos efeitos — o chamado sai com o texto completo e os arquivos
+  if ((v || vm) && r.classificacao === 'resposta') {
+    await guardarMensagem(linha.id, m, fonte).catch(e =>
+      console.error(`[gaulke-mail] caixa "${conta.nome}": nao guardou a mensagem #${linha.id}:`, e instanceof Error ? e.message : e)
+    )
+  }
   if (v) await aplicarEfeito(v, r, linha.id, { de, assunto: m.subject ?? null, recebidoEm: m.date ?? null })
   if (vm) await aplicarEfeitoModulo(vm, r, conta, { inboundId: linha.id, de, assunto: m.subject ?? null, recebidoEm: m.date ?? null })
   return { novo: true, classificacao: r.classificacao, vinculado: !!(v || vm) }

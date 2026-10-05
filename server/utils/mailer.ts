@@ -214,6 +214,9 @@ export async function enviarEmail(opts: {
   messageId?: string
   /** anexos (o PDF assinado vai para todos os signatarios) */
   anexos?: { nome: string; conteudo: Buffer; tipo?: string }[]
+  /** resposta a uma mensagem: mantem a conversa junta no e-mail do cliente */
+  inReplyTo?: string | null
+  references?: string | null
 }) {
   const conta = opts.conta ?? (await resolverConta())
   if (!conta.enabled) {
@@ -231,6 +234,8 @@ export async function enviarEmail(opts: {
     from: conta.from,
     replyTo: replyTo || undefined,
     ...(opts.messageId ? { messageId: opts.messageId } : {}),
+    ...(opts.inReplyTo ? { inReplyTo: opts.inReplyTo } : {}),
+    ...(opts.references ? { references: opts.references } : {}),
     to: opts.para,
     subject: opts.assunto,
     html: opts.html,

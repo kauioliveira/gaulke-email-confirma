@@ -1,6 +1,7 @@
 import { readdir, stat, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { useSql } from '../db'
+import { apagarPastaMensagem } from './caixa/guardar'
 import { lerConfig, gravarConfig } from './config'
 import { storageDir, caminhoNoStorage } from './storage'
 import { documentosDir, apagarDocumento, apagarPastaDocumento } from './documentos'
@@ -240,6 +241,18 @@ export async function executarRetencao(o: {
         or (recipient_id is null and batch_id is null and solic_id is null and assin_documento_id is null
             and processado_em < ${k.comunicados}::timestamptz)`
   r.caixa = cx?.n ?? 0
+  // pastas das respostas guardadas inteiras (.eml e anexos do cliente) que saem junto
+  const pastasCaixa = (
+    await sql<{ p: string }[]>`
+      select pasta as p from sys_mail_inbound
+       where pasta is not null and (
+             batch_id = any(${idsLotes}::int[])
+          or recipient_id in (select id from sys_mail_recipients where batch_id = any(${idsLotes}::int[]))
+          or solic_id = any(${idsSolic}::int[])
+          or assin_documento_id = any(${idsAssin}::int[])
+          or (recipient_id is null and batch_id is null and solic_id is null and assin_documento_id is null
+              and processado_em < ${k.comunicados}::timestamptz))`
+  ).map(x => x.p)
 
   const [au] = await sql<{ n: number }[]>`
     select count(*)::int as n from sys_mail_auditoria
@@ -305,6 +318,13 @@ export async function executarRetencao(o: {
     return r
   }
 
+  for (const p of pastasCaixa) {
+    try {
+      await apagarPastaMensagem(p)
+    } catch (e) {
+      erro(`pasta da caixa ${p}`, e)
+    }
+  }
   for (const s of alvos.solicitacoes) {
     if (!s.pasta) continue
     try {

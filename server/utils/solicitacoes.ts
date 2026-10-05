@@ -937,15 +937,22 @@ export async function detalheSolicitacao(id: number): Promise<DetalheSolicitacao
           removidoEm: iso(a.removidoEm)
         }))
     })),
-    eventos: eventos.map(e => ({
-      id: e.id,
-      itemId: e.itemId,
-      tipo: e.tipo,
-      descricao: e.descricao,
-      porNome: e.porNome,
-      ip: e.ip,
-      criadoEm: e.criadoEm.toISOString()
-    }))
+    eventos: eventos.map(e => {
+      const meta = (e.meta ?? {}) as { trecho?: string; inboundId?: number }
+      return {
+        id: e.id,
+        itemId: e.itemId,
+        tipo: e.tipo,
+        descricao: e.descricao,
+        porNome: e.porNome,
+        ip: e.ip,
+        criadoEm: e.criadoEm.toISOString(),
+        // o que o cliente escreveu por e-mail aparece no proprio historico
+        ...(e.tipo === 'resposta_email' || e.tipo === 'resposta_enviada'
+          ? { trecho: e.tipo === 'resposta_email' ? (meta.trecho ?? null) : null, inboundId: meta.inboundId ?? null }
+          : {})
+      }
+    })
   }
 }
 

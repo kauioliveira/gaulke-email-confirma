@@ -386,6 +386,14 @@ export const inbound = pgTable(
     solicId: integer('solic_id'),
     assinDocumentoId: integer('assin_documento_id'),
     assinSignatarioId: integer('assin_signatario_id'),
+    // e-mail completo das RESPOSTAS ligadas a um envio (migration 0021)
+    para: text('para'),
+    referencias: text('referencias'),
+    corpoTexto: text('corpo_texto'),
+    corpoHtml: text('corpo_html'),
+    pasta: text('pasta'),
+    tamanho: integer('tamanho'),
+    anexos: jsonb('anexos').$type<AnexoRecebido[] | null>(),
     processadoEm: timestamp('processado_em', { withTimezone: true }).defaultNow().notNull()
   },
   t => [
@@ -393,6 +401,35 @@ export const inbound = pgTable(
     index('sys_mail_inbound_recipient_idx').on(t.recipientId)
   ]
 )
+
+/** Arquivo que o cliente mandou na resposta (em documentos/<pasta>/<arquivo>). */
+export type AnexoRecebido = {
+  nome: string
+  tipo: string
+  tamanho: number
+  arquivo: string
+  sha256: string
+  /** limpo | sem_antivirus | erro | infectado (infectado: o arquivo foi apagado) */
+  antivirus: string
+}
+
+/** Respostas que a equipe mandou ao cliente pelo sistema (migration 0021). */
+export const inboundRespostas = pgTable('sys_mail_inbound_respostas', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  inboundId: bigint('inbound_id', { mode: 'number' })
+    .notNull()
+    .references(() => inbound.id, { onDelete: 'cascade' }),
+  para: varchar('para', { length: 320 }).notNull(),
+  assunto: varchar('assunto', { length: 500 }).notNull(),
+  texto: text('texto').notNull(),
+  anexos: jsonb('anexos').$type<{ nome: string; tamanho: number }[] | null>(),
+  messageId: text('message_id'),
+  enviadoPorUserId: integer('enviado_por_user_id'),
+  enviadoPorNome: varchar('enviado_por_nome', { length: 255 }),
+  enviadoEm: timestamp('enviado_em', { withTimezone: true }),
+  erro: text('erro'),
+  criadoEm: timestamp('criado_em', { withTimezone: true }).defaultNow().notNull()
+})
 
 /** Fila de chamados no painel: tentada de novo ate o painel responder. */
 export const ticketsPainel = pgTable('sys_mail_tickets', {

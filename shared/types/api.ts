@@ -19,6 +19,8 @@ export type TipoEvento =
   | 'acesso' | 'confirmacao' | 'download' | 'reenvio'
   // lidos da caixa do canal pelo monitor (Fase 3)
   | 'devolucao' | 'recibo' | 'auto_resposta' | 'resposta'
+  // a equipe respondeu o cliente pelo sistema (tela do e-mail recebido)
+  | 'resposta_enviada'
 
 /** documento: o cliente acessa, confirma e baixa um arquivo; comunicado: só um aviso */
 export type TipoTemplate = 'documento' | 'comunicado'
@@ -759,6 +761,9 @@ export interface EventoSolicitacao {
   porNome: string | null
   ip: string | null
   criadoEm: string
+  /** resposta do cliente por e-mail: o texto e a mensagem guardada (tela da caixa) */
+  trecho?: string | null
+  inboundId?: number | null
 }
 
 export interface DetalheSolicitacao extends ResumoSolicitacao {

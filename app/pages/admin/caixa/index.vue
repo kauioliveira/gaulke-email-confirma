@@ -145,6 +145,15 @@ async function removerSupressao(e: EnderecoSuprimido) {
                 :label="m.ticketCode ?? (m.ticketStatus === 'erro' ? 'chamado com erro' : 'chamado na fila')"
               />
               <UButton
+                v-if="m.classificacao === 'resposta' && (m.recipientId || m.solicId || m.assinDocumentoId)"
+                :to="`/admin/caixa/${m.id}`"
+                label="Abrir e responder"
+                icon="i-lucide-mail-open"
+                size="xs"
+                color="primary"
+                variant="soft"
+              />
+              <UButton
                 v-if="m.trecho"
                 :icon="aberta === m.id ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
                 size="xs"

@@ -4,6 +4,7 @@ import { operadorAtual, temPapel } from '../../../../utils/permissoes'
 import { auditar } from '../../../../utils/auditoria'
 import { carregarSolicitacao } from '../../../../utils/solicitacoes'
 import { apagarDocumento, apagarPastaDocumento, codigoSolicitacao } from '../../../../utils/documentos'
+import { apagarPastaMensagem } from '../../../../utils/caixa/guardar'
 
 const schema = z.object({
   // dupla confirmacao: a tela pede para digitar o codigo, e o servidor confere
@@ -49,6 +50,9 @@ export default defineEventHandler(async event => {
     throw createError({ statusCode: 403, statusMessage: `Só quem pediu (${s.criadoPorNome}), supervisores e administradores excluem.` })
   }
 
+  // respostas do cliente guardadas inteiras: a pasta sai junto
+  const pastasCaixa = (await sql<{ p: string }[]>`select pasta as p from sys_mail_inbound where solic_id = ${s.id} and pasta is not null`).map(x => x.p)
+
   await sql.begin(async tx => {
     // a caixa nao tem FK para a solicitacao: sai antes, a mao (como na retencao)
     await tx`delete from sys_mail_inbound where solic_id = ${s.id}`
@@ -63,6 +67,13 @@ export default defineEventHandler(async event => {
       await apagarDocumento(a.caminho)
     } catch (e) {
       avisos.push(`${a.caminho}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  for (const p of pastasCaixa) {
+    try {
+      await apagarPastaMensagem(p)
+    } catch (e) {
+      avisos.push(`caixa: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
   if (s.pasta) {

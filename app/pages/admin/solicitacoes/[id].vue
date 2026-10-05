@@ -215,6 +215,7 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
   acesso: 'i-lucide-eye',
   arquivo_recebido: 'i-lucide-file-up',
   resposta: 'i-lucide-message-square-text',
+  resposta_enviada: 'i-lucide-send',
   resposta_apagada: 'i-lucide-message-square-x',
   arquivo_removido: 'i-lucide-file-minus',
   arquivo_infectado: 'i-lucide-shield-x',
@@ -567,6 +568,10 @@ const ICONE_EVENTO_SOLIC: Record<string, string> = {
               <UIcon :name="ICONE_EVENTO_SOLIC[e.tipo] || 'i-lucide-dot'" class="mt-0.5 size-4 shrink-0 text-muted" />
               <div class="min-w-0">
                 <p>{{ e.descricao }}</p>
+                <p v-if="e.trecho" class="mt-1 line-clamp-4 whitespace-pre-line rounded-md border-l-2 border-primary/50 bg-elevated/50 px-2 py-1 text-sm">{{ e.trecho }}</p>
+                <NuxtLink v-if="e.inboundId" :to="`/admin/caixa/${e.inboundId}`" class="text-xs font-medium text-primary hover:underline">
+                  {{ e.tipo === 'resposta_email' ? 'Ver o e-mail completo e responder' : 'Ver a conversa' }}
+                </NuxtLink>
                 <p class="text-xs text-muted">
                   {{ formatarDataHora(e.criadoEm) }}<template v-if="e.porNome && e.porNome !== 'cliente'"> · {{ e.porNome }}</template><template v-if="e.ip"> · IP {{ e.ip }}</template>
                 </p>

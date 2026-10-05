@@ -1,9 +1,12 @@
 import { and, desc, eq, isNotNull, lte, ne, sql } from 'drizzle-orm'
-import { useDb, useSql, ticketsPainel, batches, recipients, type Batch, type Recipient, type Solicitacao } from '../db'
+import { useDb, useSql, ticketsPainel, batches, recipients, inbound, type Batch, type Recipient, type Solicitacao, type AnexoRecebido } from '../db'
 import { lerConfig } from './config'
 import { decifrar } from './cripto'
 import { semAspas } from './env'
 import { baseUrl } from './urls'
+import { readFile } from 'node:fs/promises'
+import { caminhoDocumento } from './documentos'
+import { semCitacao } from './caixa/classificar'
 
 /**
  * Chamados no painel (gaulke-data-tools-ts) a partir do que acontece nos envios.
@@ -45,11 +48,12 @@ class ErroPainel extends Error {
 }
 
 async function chamarPainel<T>(cfg: ConfigPainel, metodo: 'GET' | 'POST', caminho: string, corpo?: unknown): Promise<T> {
+  // com anexos o corpo e grande: mais tempo para subir
   const r = await fetch(`${cfg.url}/api/integracoes/comunica${caminho}`, {
     method: metodo,
     headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json', accept: 'application/json' },
     body: corpo ? JSON.stringify(corpo) : undefined,
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(corpo && JSON.stringify(corpo).length > 1_000_000 ? 120_000 : 20_000)
   })
   const texto = await r.text()
   let json: any = null
@@ -89,6 +93,49 @@ function solicitanteDo(lote: Batch) {
   return lote.criadoPorUserId ?? lote.disparadoPorUserId ?? null
 }
 
+const tamanhoLegivel = (n: number) =>
+  n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+
+/**
+ * Texto do chamado de RESPOSTA, no formato do painel (cada linha e um
+ * paragrafo; **negrito** destaca). A resposta do cliente vem inteira e em
+ * primeiro lugar: quem le o chamado quase nunca tem acesso a caixa do canal.
+ */
+async function textoDaResposta(o: {
+  inboundId: number
+  quem: string
+  empresa: string | null
+  referente: string
+  de: string | null
+  assunto: string | null
+  recebidoEm: Date | null
+  trecho: string | null
+}) {
+  const [m] = await useDb()
+    .select({ corpo: inbound.corpoTexto, anexos: inbound.anexos })
+    .from(inbound)
+    .where(eq(inbound.id, o.inboundId))
+  // o corpo guardado e o texto todo; sem a citacao do nosso e-mail fica so o que o cliente escreveu
+  const resposta = (m?.corpo ? semCitacao(m.corpo) : '') || o.trecho?.trim() || ''
+  const anexos = (m?.anexos ?? []) as AnexoRecebido[]
+  const link = linkAdmin(`/admin/caixa/${o.inboundId}`)
+  return [
+    `${o.quem}${o.empresa ? ` (${o.empresa})` : ''} respondeu ${o.referente}.`,
+    '',
+    '**O cliente respondeu:**',
+    resposta ? resposta.slice(0, 15000) + (resposta.length > 15000 ? '\n[…continua no e-mail completo]' : '') : '(sem texto — veja o e-mail completo)',
+    '',
+    `**De:** ${o.de ?? '—'}`,
+    `**Assunto:** ${o.assunto ?? '—'}`,
+    `**Recebida em:** ${formatarDataHora(o.recebidoEm ?? new Date())} (Brasília)`,
+    anexos.length
+      ? `**Anexos do cliente:** ${anexos.map(a => `${a.nome} (${tamanhoLegivel(a.tamanho)})${a.antivirus === 'infectado' ? ' — bloqueado pelo antivírus' : ''}`).join('; ')}`
+      : '**Anexos do cliente:** nenhum',
+    '',
+    `**Para ler o e-mail completo, baixar os anexos e responder ao cliente:** botão "Abrir sistema externo"${link ? ` (${link})` : ''}.`
+  ].join('\n').trim()
+}
+
 export async function enfileirarResposta(o: {
   lote: Batch
   destinatario: Recipient
@@ -99,19 +146,12 @@ export async function enfileirarResposta(o: {
   trecho: string | null
 }) {
   const quem = o.destinatario.nome || o.destinatario.email
-  const descricao = [
-    `${quem}${o.destinatario.empresa ? ` (${o.destinatario.empresa})` : ''} respondeu ao envio "${o.lote.nome}".`,
-    '',
-    `De: ${o.de ?? o.destinatario.email}`,
-    `Assunto: ${o.assunto ?? '—'}`,
-    `Recebida em: ${formatarDataHora(o.recebidoEm)} (Brasília)`,
-    `Código do envio: ${o.destinatario.codigo}`,
-    '',
-    'Mensagem:',
-    o.trecho?.trim() || '(sem texto — veja a mensagem na caixa de e-mail)',
-    '',
-    linkAdmin(`/admin/destinatario/${o.destinatario.id}`) ? `Histórico do destinatário: ${linkAdmin(`/admin/destinatario/${o.destinatario.id}`)}` : ''
-  ].join('\n').trim()
+  const descricao = await textoDaResposta({
+    ...o,
+    quem,
+    empresa: o.destinatario.empresa,
+    referente: `ao envio "${o.lote.nome}" (código ${o.destinatario.codigo})`
+  })
 
   await useDb().insert(ticketsPainel).values({
     motivo: 'resposta',
@@ -122,7 +162,7 @@ export async function enfileirarResposta(o: {
     titulo: `Resposta de ${quem} — ${o.lote.nome}`.slice(0, 255),
     descricao,
     externalCode: `comunica:resposta:${o.inboundId}`,
-    externalUrl: linkAdmin(`/admin/destinatario/${o.destinatario.id}`)
+    externalUrl: linkAdmin(`/admin/caixa/${o.inboundId}`) ?? linkAdmin(`/admin/destinatario/${o.destinatario.id}`)
   })
 }
 
@@ -143,20 +183,12 @@ export async function enfileirarRespostaSolic(o: {
 }) {
   const s = o.solic
   const quem = s.destinatarioNome || s.destinatarioEmail
-  const link = linkAdmin(`/admin/solicitacoes/${s.id}`)
-  const descricao = [
-    `${quem}${s.empresa ? ` (${s.empresa})` : ''} respondeu por e-mail à solicitação "${s.titulo}".`,
-    '',
-    `De: ${o.de ?? s.destinatarioEmail}`,
-    `Assunto: ${o.assunto ?? '—'}`,
-    `Recebida em: ${formatarDataHora(o.recebidoEm ?? new Date())} (Brasília)`,
-    `Código da solicitação: ${o.codigo}`,
-    '',
-    'Mensagem:',
-    o.trecho?.trim() || '(sem texto — veja a mensagem na caixa de e-mail)',
-    '',
-    link ? `Solicitação: ${link}` : ''
-  ].join('\n').trim()
+  const descricao = await textoDaResposta({
+    ...o,
+    quem,
+    empresa: s.empresa,
+    referente: `por e-mail à solicitação "${s.titulo}" (${o.codigo})`
+  })
 
   await useDb()
     .insert(ticketsPainel)
@@ -168,9 +200,43 @@ export async function enfileirarRespostaSolic(o: {
       titulo: `Resposta de ${quem} — ${s.titulo}`.slice(0, 255),
       descricao,
       externalCode: `comunica:resposta:${o.inboundId}`,
-      externalUrl: link
+      externalUrl: linkAdmin(`/admin/caixa/${o.inboundId}`) ?? linkAdmin(`/admin/solicitacoes/${s.id}`)
     })
     .onConflictDoNothing()
+}
+
+/**
+ * A equipe respondeu o cliente pelo Comunica: vira comentario no chamado
+ * aberto por aquela mensagem (se houver). A fila espera o chamado existir.
+ */
+export async function enfileirarRespostaEnviada(o: {
+  inboundId: number
+  solicitanteUserId: number | null
+  porNome: string
+  para: string
+  texto: string
+  anexos: string[]
+}) {
+  const corpo = [
+    `**Respondido ao cliente por ${o.porNome}, pelo Comunica:**`,
+    o.texto.trim().slice(0, 15000),
+    '',
+    `**Para:** ${o.para}`,
+    o.anexos.length ? `**Anexos enviados:** ${o.anexos.join('; ')}` : ''
+  ]
+    .join('\n')
+    .trim()
+  await useDb()
+    .insert(ticketsPainel)
+    .values({
+      motivo: 'resposta_enviada',
+      inboundId: o.inboundId,
+      solicitanteUserId: o.solicitanteUserId,
+      titulo: 'Resposta enviada ao cliente',
+      descricao: corpo,
+      externalCode: `comunica:resposta-enviada:${o.inboundId}:${Date.now()}`,
+      acao: 'comentar'
+    })
 }
 
 /**
@@ -239,6 +305,50 @@ export async function verificarSemConfirmacao() {
 
 const MAX_TENTATIVAS = 12
 
+/** teto do que vai anexado num chamado (base64 cresce ~33%; o proxy corta perto de 30 MB) */
+const MAX_ANEXOS_CHAMADO = 18 * 1024 * 1024
+
+type AnexoPainel = { nome: string; mimeType: string; base64: string }
+
+/**
+ * O .eml original e os arquivos do cliente, para irem anexados ao chamado.
+ * Infectado nao vai; passando do teto, vai o que couber (o resto fica no
+ * Comunica, e o texto do chamado ja aponta para la).
+ */
+async function anexosDaMensagem(inboundId: number | null): Promise<AnexoPainel[]> {
+  if (!inboundId) return []
+  const [m] = await useDb().select({ pasta: inbound.pasta, anexos: inbound.anexos }).from(inbound).where(eq(inbound.id, inboundId))
+  if (!m?.pasta) return []
+  const saida: AnexoPainel[] = []
+  let total = 0
+  const incluir = async (arquivo: string, nome: string, mimeType: string) => {
+    const dados = await readFile(caminhoDocumento(`${m.pasta}/${arquivo}`)).catch(() => null)
+    if (!dados || total + dados.length > MAX_ANEXOS_CHAMADO) return
+    total += dados.length
+    saida.push({ nome, mimeType, base64: dados.toString('base64') })
+  }
+  for (const a of (m.anexos ?? []) as AnexoRecebido[]) {
+    if (a.antivirus !== 'infectado') await incluir(a.arquivo, a.nome, a.tipo)
+  }
+  await incluir('mensagem.eml', 'email-do-cliente.eml', 'message/rfc822')
+  return saida
+}
+
+/** Envia com anexos; se o painel recusar o tamanho, manda sem eles. */
+async function comAnexos<T>(cfg: ConfigPainel, caminho: string, corpo: Record<string, unknown>, anexos: AnexoPainel[]) {
+  if (!anexos.length) return chamarPainel<T>(cfg, 'POST', caminho, corpo)
+  try {
+    return await chamarPainel<T>(cfg, 'POST', caminho, { ...corpo, anexos })
+  } catch (e) {
+    if (!(e instanceof ErroPainel) || ![400, 413].includes(e.status)) throw e
+    const nota = '\n\n(Os anexos não couberam no chamado: baixe pelo botão "Abrir sistema externo".)'
+    const semAnexos = { ...corpo }
+    if (typeof semAnexos.descricao === 'string') semAnexos.descricao += nota
+    if (typeof semAnexos.corpo === 'string') semAnexos.corpo += nota
+    return chamarPainel<T>(cfg, 'POST', caminho, semAnexos)
+  }
+}
+
 /** 1, 2, 4, 8... minutos, ate 1h entre tentativas. */
 function espera(tentativas: number) {
   return Math.min(60, 2 ** Math.max(0, tentativas - 1)) * 60_000
@@ -282,6 +392,31 @@ export async function processarFilaTickets() {
         let acao = t.acao
         let alvo = t.ticketUuid
 
+        // resposta que a EQUIPE mandou ao cliente: comentario no chamado daquela conversa
+        if (t.motivo === 'resposta_enviada' && !alvo) {
+          const [dono] = await db
+            .select({ uuid: ticketsPainel.ticketUuid, status: ticketsPainel.statusEnvio })
+            .from(ticketsPainel)
+            .where(and(eq(ticketsPainel.inboundId, t.inboundId!), eq(ticketsPainel.motivo, 'resposta')))
+            .orderBy(desc(ticketsPainel.id))
+            .limit(1)
+          if (!dono) {
+            // essa conversa nao virou chamado: nao ha onde comentar
+            await db.update(ticketsPainel).set({ statusEnvio: 'ignorado', erro: null, atualizadoEm: new Date() }).where(eq(ticketsPainel.id, t.id))
+            continue
+          }
+          if (!dono.uuid) {
+            // o chamado ainda nao saiu: tenta de novo daqui a pouco, sem gastar tentativa
+            await db
+              .update(ticketsPainel)
+              .set({ tentativas: t.tentativas, proximaTentativaEm: new Date(Date.now() + 5 * 60_000) })
+              .where(eq(ticketsPainel.id, t.id))
+            continue
+          }
+          acao = 'comentar'
+          alvo = dono.uuid
+        }
+
         // resposta: comenta no chamado aberto do MESMO destinatario (lote) ou
         // da MESMA solicitacao, se houver
         if (!acao && t.motivo === 'resposta' && (t.recipientId || t.solicId)) {
@@ -310,10 +445,15 @@ export async function processarFilaTickets() {
         }
 
         if (acao === 'comentar' && alvo) {
-          await chamarPainel(cfg, 'POST', `/tickets/${alvo}/comentarios`, {
-            solicitanteUserId: t.solicitanteUserId,
-            corpo: `Nova mensagem do cliente:\n\n${t.descricao}`
-          })
+          await comAnexos(
+            cfg,
+            `/tickets/${alvo}/comentarios`,
+            {
+              solicitanteUserId: t.solicitanteUserId,
+              corpo: t.motivo === 'resposta' ? `**Nova mensagem do cliente**\n\n${t.descricao}` : t.descricao
+            },
+            t.motivo === 'resposta' ? await anexosDaMensagem(t.inboundId) : []
+          )
           await db
             .update(ticketsPainel)
             .set({ acao, ticketUuid: alvo, statusEnvio: 'comentado', erro: null, atualizadoEm: new Date() })
@@ -324,14 +464,19 @@ export async function processarFilaTickets() {
               select ticket_code from sys_mail_tickets where ticket_uuid = ${alvo} and ticket_code is not null limit 1)
              where id = ${t.id}`)
         } else {
-          const r = await chamarPainel<RespostaAbrir>(cfg, 'POST', '/tickets', {
-            solicitanteUserId: t.solicitanteUserId,
-            titulo: t.titulo,
-            descricao: t.descricao,
-            externalCode: t.externalCode,
-            externalUrl: t.externalUrl ?? undefined,
-            metadata: { motivo: t.motivo, loteId: t.batchId, destinatarioId: t.recipientId, solicitacaoId: t.solicId }
-          })
+          const r = await comAnexos<RespostaAbrir>(
+            cfg,
+            '/tickets',
+            {
+              solicitanteUserId: t.solicitanteUserId,
+              titulo: t.titulo,
+              descricao: t.descricao,
+              externalCode: t.externalCode,
+              externalUrl: t.externalUrl ?? undefined,
+              metadata: { motivo: t.motivo, loteId: t.batchId, destinatarioId: t.recipientId, solicitacaoId: t.solicId }
+            },
+            t.motivo === 'resposta' ? await anexosDaMensagem(t.inboundId) : []
+          )
           await db
             .update(ticketsPainel)
             .set({
