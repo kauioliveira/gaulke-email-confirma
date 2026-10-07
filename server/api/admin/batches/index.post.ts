@@ -10,6 +10,7 @@ import { blocosSchema, faltaBotaoDeAcesso, MSG_BOTAO_OBRIGATORIO } from '../../.
 import { auditar } from '../../../utils/auditoria'
 import { suprimidos } from '../../../utils/supressao'
 import { registrarContatosEmpresa } from '../../../utils/empresa-contatos'
+import { camposLoteSchema, normalizarCamposLote, gravarCamposLote } from '../../../utils/lote-campos'
 
 const schema = z.object({
   nome: z.string().min(1).max(200),
@@ -63,6 +64,11 @@ const schema = z.object({
    * dele mesmo assim (veja a regeracao logo abaixo).
    */
   blocos: blocosSchema.nullish(),
+  /**
+   * Campos que o cliente preenche na pagina antes de baixar (texto, escolha,
+   * declaracao...). Obrigatorio sem resposta bloqueia confirmacao e download.
+   */
+  campos: camposLoteSchema.default([]),
   destinatarios: z
     .array(
       z.object({
@@ -90,6 +96,8 @@ export default defineEventHandler(async event => {
    * regra nao se aplica — e um comunicado, e o botao e opcional.
    */
   const modoAnexo = dados.modoAnexo ?? (dados.arquivoNome ? 'unico' : 'nenhum')
+  // valida antes de criar qualquer coisa: campo mal configurado nao vira lote
+  const campos = normalizarCamposLote(dados.campos)
   const comArquivoIndividual = dados.destinatarios.filter(d => d.arquivoNome)
   if (modoAnexo === 'individual') {
     if (!comArquivoIndividual.length) {
@@ -231,8 +239,16 @@ export default defineEventHandler(async event => {
     })
     .returning()
 
-  // dedupe final no servidor: a UI pode ter sido burlada
+  /**
+   * Dedupe final no servidor: a UI pode ter sido burlada.
+   *
+   * No anexo individual a chave e e-mail + arquivo: na contabilidade o mesmo
+   * socio recebe por varias empresas, e cada arquivo precisa do seu link e do
+   * seu codigo — deduplicar so pelo e-mail deixava ele com um arquivo so.
+   */
   const vistos = new Set<string>()
+  const chaveDe = (email: string, arquivo: string | null | undefined) =>
+    modoAnexo === 'individual' && arquivo ? `${email}|${arquivo}` : email
   const linhas = []
   // enderecos suprimidos (devolveram definitivamente) ficam de fora: a tela ja
   // avisa antes; aqui e a garantia
@@ -241,8 +257,9 @@ export default defineEventHandler(async event => {
   for (const d of dados.destinatarios) {
     const email = d.email.trim().toLowerCase()
     if (bloqueados.has(email)) { ignoradosSupressao++; continue }
-    if (vistos.has(email)) continue
-    vistos.add(email)
+    const chave = chaveDe(email, d.arquivoNome)
+    if (vistos.has(chave)) continue
+    vistos.add(chave)
     linhas.push({
       batchId: lote!.id,
       email,
@@ -265,6 +282,8 @@ export default defineEventHandler(async event => {
       statusMessage: 'Todos os destinatários estão na lista de supressão (devolveram definitivamente). Corrija os e-mails.'
     })
   }
+
+  await gravarCamposLote(lote!.id, campos)
 
   // insere em blocos para nao estourar o limite de parametros do Postgres
   const inseridos = []
@@ -293,7 +312,8 @@ export default defineEventHandler(async event => {
       arquivo: lote!.arquivoNome,
       lembrete: dados.lembrete ?? null,
       templateId: dados.templateId ?? null,
-      agendadoPara: dados.agendadoPara ?? null
+      agendadoPara: dados.agendadoPara ?? null,
+      campos: campos.length ? campos.map(c => ({ tipo: c.tipo, titulo: c.titulo, obrigatorio: c.obrigatorio })) : undefined
     }
   })
 

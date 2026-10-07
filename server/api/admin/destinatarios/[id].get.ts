@@ -2,6 +2,7 @@ import { eq, asc, sql } from 'drizzle-orm'
 import { useDb, recipients, batches, events, envios } from '../../../db'
 import { temPapel } from '../../../utils/permissoes'
 import { linkAcesso } from '../../../utils/urls'
+import { camposComRespostas } from '../../../utils/lote-campos'
 
 /** Ficha individual: todos os eventos com IP, user-agent e horario. */
 export default defineEventHandler(async event => {
@@ -52,6 +53,8 @@ export default defineEventHandler(async event => {
     ...linha,
     link: linkAcesso(linha.destinatario.token),
     timeline,
-    envios: historico
+    envios: historico,
+    // o que o cliente preencheu na pagina de download (lote com campos)
+    campos: await camposComRespostas(linha.loteId, id)
   }
 })

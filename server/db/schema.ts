@@ -236,6 +236,46 @@ export const recipients = pgTable(
   ]
 )
 
+/**
+ * Campos da pagina de download de um lote (migration 0022): o que o cliente
+ * preenche antes de baixar. Mesmos tipos dos itens da solicitacao.
+ */
+export const batchCampos = pgTable(
+  'sys_mail_batch_campos',
+  {
+    id: serial('id').primaryKey(),
+    batchId: integer('batch_id')
+      .references(() => batches.id, { onDelete: 'cascade' })
+      .notNull(),
+    ordem: integer('ordem').default(0).notNull(),
+    tipo: varchar('tipo', { length: 20 }).$type<TipoItemSolic>().notNull(),
+    titulo: varchar('titulo', { length: 200 }).default('').notNull(),
+    instrucao: text('instrucao'),
+    obrigatorio: boolean('obrigatorio').default(true).notNull(),
+    config: jsonb('config').$type<ConfigItem>().default({}).notNull()
+  },
+  t => [index('sys_mail_batch_campos_batch_idx').on(t.batchId, t.ordem)]
+)
+
+/** Resposta de um destinatario a um campo do lote, com IP e navegador. */
+export const recipientRespostas = pgTable(
+  'sys_mail_recipient_respostas',
+  {
+    id: serial('id').primaryKey(),
+    recipientId: integer('recipient_id')
+      .references(() => recipients.id, { onDelete: 'cascade' })
+      .notNull(),
+    campoId: integer('campo_id')
+      .references(() => batchCampos.id, { onDelete: 'cascade' })
+      .notNull(),
+    resposta: jsonb('resposta').$type<RespostaItem>().notNull(),
+    respondidoEm: timestamp('respondido_em', { withTimezone: true }).defaultNow().notNull(),
+    ip: varchar('ip', { length: 64 }),
+    userAgent: text('user_agent')
+  },
+  t => [uniqueIndex('sys_mail_recipient_respostas_idx').on(t.recipientId, t.campoId)]
+)
+
 export const events = pgTable(
   'sys_mail_events',
   {
@@ -827,6 +867,8 @@ export type ReenvioPendente = {
   lembrete?: boolean
 }
 export type MailEvent = typeof events.$inferSelect
+export type BatchCampo = typeof batchCampos.$inferSelect
+export type RecipientResposta = typeof recipientRespostas.$inferSelect
 export type Auditoria = typeof auditoria.$inferSelect
 /**
  * Qual e-mail recebe por CPF/CNPJ (migration 0019). A tabela company nao tem

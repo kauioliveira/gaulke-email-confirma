@@ -10,7 +10,8 @@ import { mascaraTelefone, lerNumeroBR, type EntradaEscolha } from '~~/shared/uti
  * `salvar` pede para gravar já (saiu do campo, marcou uma opção, aceitou a
  * declaração) — o resto espera uma pausa na digitação.
  */
-type Item = LandingSolicitacao['itens'][number]
+// so tipo e config: serve tambem aos campos da pagina de download do lote (/c/:token)
+type Item = Pick<LandingSolicitacao['itens'][number], 'tipo' | 'config'>
 const props = defineProps<{ item: Item; desabilitado?: boolean; erro?: string | null }>()
 const valor = defineModel<unknown>({ required: true })
 const emit = defineEmits<{ salvar: [] }>()

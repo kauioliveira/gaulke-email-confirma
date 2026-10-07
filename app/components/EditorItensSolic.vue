@@ -21,10 +21,15 @@ import {
  * de checklist, que têm os mesmos itens.
  */
 const itens = defineModel<ItemModeloChecklist[]>({ required: true })
+/**
+ * semDocumento: so campos de resposta, sem envio de arquivo nem conferencia
+ * da equipe — e o caso dos campos da pagina de download de um lote.
+ */
+const props = defineProps<{ semDocumento?: boolean }>()
 const toast = useToast()
 
 const opcoesFamilias = FAMILIAS_SOLICITACAO.map(f => ({ label: f.rotulo, value: f.valor, icon: f.icone }))
-const opcoesTipo = TIPOS_ITEM_SOLIC.map(t => ({ label: t.rotulo, value: t.valor, icon: t.icone }))
+const opcoesTipo = TIPOS_ITEM_SOLIC.filter(t => !props.semDocumento || t.valor !== 'documento').map(t => ({ label: t.rotulo, value: t.valor, icon: t.icone }))
 const abertos = ref<Set<number>>(new Set())
 
 const PLACEHOLDER: Partial<Record<TipoItemSolic, string>> = {
@@ -64,7 +69,7 @@ function adicionar(tipo: TipoItemSolic, preset?: 'sim_nao') {
 }
 
 const menuAdicionar: DropdownMenuItem[][] = [
-  [{ label: 'Documento (arquivo)', icon: 'i-lucide-file-up', onSelect: () => adicionar('documento') }],
+  ...(props.semDocumento ? [] : [[{ label: 'Documento (arquivo)', icon: 'i-lucide-file-up', onSelect: () => adicionar('documento') }]]),
   [
     { label: 'Texto curto', icon: 'i-lucide-type', onSelect: () => adicionar('texto_curto') },
     { label: 'Texto longo', icon: 'i-lucide-align-left', onSelect: () => adicionar('texto_longo') },
@@ -149,7 +154,7 @@ function resumo(item: ItemModeloChecklist) {
     if (item.modeloNome) partes.push(`modelo: ${item.modeloNome}`)
     return partes.join(' · ')
   }
-  return [rotuloTipoItem(item.tipo), descreverConfig(item.tipo, item.config), item.config.conferir === false ? 'aprovação automática' : '']
+  return [rotuloTipoItem(item.tipo), descreverConfig(item.tipo, item.config), !props.semDocumento && item.config.conferir === false ? 'aprovação automática' : '']
     .filter(Boolean)
     .join(' · ')
 }
@@ -226,7 +231,9 @@ const numeroOuNada = (v: unknown) => (v === '' || v == null || Number.isNaN(Numb
           :description="
             item.tipo === 'documento'
               ? 'Obrigatório: a solicitação só conclui com ele aprovado (ou com “não possuo” aceito).'
-              : 'Obrigatório: o cliente precisa responder para concluir.'
+              : semDocumento
+                ? 'Obrigatório: o cliente só baixa o arquivo depois de responder.'
+                : 'Obrigatório: o cliente precisa responder para concluir.'
           "
           class="self-end"
           @update:model-value="v => alterar(i, { obrigatorio: v })"
@@ -495,7 +502,7 @@ const numeroOuNada = (v: unknown) => (v === '' || v == null || Number.isNaN(Numb
         </template>
 
         <USwitch
-          v-if="item.tipo !== 'documento' && item.tipo !== 'informativo'"
+          v-if="!semDocumento && item.tipo !== 'documento' && item.tipo !== 'informativo'"
           :model-value="item.config.conferir === false"
           label="Aprovar a resposta automaticamente"
           description="Sem conferência da equipe: respondeu, está aprovado."

@@ -12,10 +12,16 @@
  *  3. o nome ou a empresa IGUAL ao nome do arquivo (sem acento, caixa ou
  *     pontuacao): "ACME Ltda.pdf" para a empresa "Acme LTDA". Igual, e nao
  *     "contem": "Maria.pdf" nao pode ir para "Maria Oliveira" e "Maria Souza".
- * O que sobrar a pessoa liga a mao na tela.
+ * O que sobrar a pessoa liga a mao na tela. Antes de tudo isso valem os
+ * documentos que o servidor ja leu DE DENTRO do arquivo (`documentos`).
  */
 
-export type ArquivoParaCasar = { nome: string; original: string }
+export type ArquivoParaCasar = {
+  nome: string
+  original: string
+  /** CPF/CNPJ ja descobertos pelo servidor (nome ou conteudo do arquivo); valem antes do nome */
+  documentos?: string[]
+}
 export type DestinatarioParaCasar = { email: string; documento?: string | null; nome?: string | null; empresa?: string | null }
 export type ComoCasou = 'documento' | 'email' | 'nome' | 'manual'
 
@@ -93,7 +99,7 @@ export function casarArquivos(
     const manual = manuais[a.nome]
     if (manual && porEmail.has(manual)) { ligar(manual, a, 'manual'); continue }
 
-    const doc = documentosNoNome(a.original).map(d => porDocumento.get(d)).find(Boolean)
+    const doc = [...(a.documentos ?? []), ...documentosNoNome(a.original)].map(d => porDocumento.get(d)).find(Boolean)
     if (doc) { ligar(doc, a, 'documento'); continue }
 
     const email = (a.original.toLowerCase().match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) ?? [])

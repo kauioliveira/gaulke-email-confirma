@@ -14,6 +14,7 @@ const TODOS_LINKS: { label: string; icon: string; to: string; papel?: PapelOpera
   { label: 'Assinaturas', icon: 'i-lucide-signature', to: '/admin/assinaturas' },
   { label: 'Templates', icon: 'i-lucide-file-code-2', to: '/admin/templates' },
   { label: 'Clientes', icon: 'i-lucide-contact', to: '/admin/clientes', mais: true },
+  { label: 'Contatos das empresas', icon: 'i-lucide-book-user', to: '/admin/contatos-empresas', mais: true },
   { label: 'Listas', icon: 'i-lucide-list', to: '/admin/listas', mais: true },
   { label: 'Relatório', icon: 'i-lucide-chart-no-axes-column', to: '/admin/relatorio', mais: true },
   { label: 'Caixa', icon: 'i-lucide-inbox', to: '/admin/caixa', mais: true },

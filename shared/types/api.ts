@@ -21,6 +21,8 @@ export type TipoEvento =
   | 'devolucao' | 'recibo' | 'auto_resposta' | 'resposta'
   // a equipe respondeu o cliente pelo sistema (tela do e-mail recebido)
   | 'resposta_enviada'
+  // o cliente preencheu os campos da pagina de download (lote com campos)
+  | 'campos'
 
 /** documento: o cliente acessa, confirma e baixa um arquivo; comunicado: só um aviso */
 export type TipoTemplate = 'documento' | 'comunicado'
@@ -439,6 +441,8 @@ export interface RespostaFichaDestinatario {
   link: string
   timeline: EventoMail[]
   envios: EnvioMail[]
+  /** campos da pagina de download, com a resposta desta pessoa */
+  campos: CampoLote[]
   loteStatus: StatusLote
   loteStartedAt: string | null
   loteExcluidoEm: string | null
@@ -495,6 +499,8 @@ export interface RespostaLanding {
   confirmado: boolean
   confirmadoEm: string | null
   downloads: number
+  /** o que o cliente preenche antes de baixar; vazio = so confirmar */
+  campos: CampoLote[]
 }
 export interface RespostaImportacao {
   arquivo: string
@@ -788,6 +794,18 @@ export interface DetalheSolicitacao extends ResumoSolicitacao {
 }
 
 /** O que a pagina publica /r/:token recebe. Nada interno (pasta, hash, IP). */
+/** Campo da pagina de download de um lote, com a resposta do destinatario. */
+export interface CampoLote {
+  id: number
+  tipo: TipoItemSolic
+  titulo: string
+  instrucao: string | null
+  obrigatorio: boolean
+  config: ConfigItem
+  resposta: RespostaItem | null
+  respondidoEm: string | null
+}
+
 export interface LandingSolicitacao {
   titulo: string
   mensagem: string | null
@@ -857,6 +875,17 @@ export interface EmpresaEncontrada {
   /** de onde veio: o cadastro da Gaulke ou so o historico de envios */
   origem: 'cadastro' | 'historico'
   /** e-mails que ja receberam por este documento, o mais recente primeiro */
+  emails: ContatoEmpresa[]
+}
+
+/** Lote "arquivos por cliente": o CPF/CNPJ de um arquivo, resolvido para empresa + e-mails. */
+export interface DocumentoResolvido {
+  documento: string
+  /** null = o documento nao esta no cadastro nem no historico */
+  nome: string | null
+  fantasia: string | null
+  ativo: boolean
+  origem: 'cadastro' | 'historico' | null
   emails: ContatoEmpresa[]
 }
 

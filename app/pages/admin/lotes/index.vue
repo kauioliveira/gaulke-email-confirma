@@ -176,6 +176,7 @@ function progresso(l: any) {
           :loading="status === 'pending'"
           @click="refresh()"
         />
+        <UButton to="/admin/lotes/novo?origem=arquivos" icon="i-lucide-folder-archive" label="Arquivos por cliente (ZIP)" color="neutral" variant="outline" />
         <UButton to="/admin/lotes/novo" icon="i-lucide-plus" label="Novo envio" />
       </div>
     </div>

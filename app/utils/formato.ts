@@ -51,7 +51,8 @@ export const ROTULOS_EVENTO: Record<string, string> = {
   devolucao: 'Devolução (não entregue)',
   recibo: 'Recibo de leitura',
   auto_resposta: 'Resposta automática',
-  resposta: 'Respondeu'
+  resposta: 'Respondeu',
+  campos: 'Preencheu os campos'
 }
 
 export const ICONES_EVENTO: Record<string, string> = {
@@ -66,7 +67,8 @@ export const ICONES_EVENTO: Record<string, string> = {
   devolucao: 'i-lucide-mail-x',
   recibo: 'i-lucide-mail-check',
   auto_resposta: 'i-lucide-bot',
-  resposta: 'i-lucide-reply'
+  resposta: 'i-lucide-reply',
+  campos: 'i-lucide-text-cursor-input'
 }
 
 /** Classificação das mensagens lidas da caixa do canal. */

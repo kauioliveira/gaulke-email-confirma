@@ -5,6 +5,7 @@ import { garantirStorage, nomeSeguro, caminhoNoStorage } from '../../utils/stora
 import { TIPOS_ANEXO, tipoPelaExtensao, assinaturaConfere, rotulosDe } from '../../../shared/types/tipos-arquivo'
 import { falhar } from '../../utils/erro'
 import { auditar } from '../../utils/auditoria'
+import { documentosNoArquivo, type OrigemDocumento } from '../../utils/documento-no-arquivo'
 
 /**
  * Upload dos arquivos INDIVIDUAIS de um lote (um por destinatario): varios
@@ -23,10 +24,20 @@ const MAX_POR_ARQUIVO = 25 * 1024 * 1024
 const MAX_TOTAL = 400 * 1024 * 1024
 const MAX_ARQUIVOS = 3000
 
-type Aceito = { nome: string; original: string; tamanho: number; tipo: string }
+type Aceito = {
+  nome: string
+  original: string
+  tamanho: number
+  tipo: string
+  /** so com ?lerDocumento=1: CPF/CNPJ achados no nome ou no conteudo */
+  documentos?: string[]
+  docOrigem?: OrigemDocumento | null
+}
 type Recusado = { original: string; motivo: string }
 
 export default defineEventHandler(async event => {
+  // lote "arquivos por cliente": descobre o dono de cada arquivo pelo CPF/CNPJ
+  const lerDocumento = getQuery(event).lerDocumento === '1'
   let partes: Awaited<ReturnType<typeof readMultipartFormData>>
   try {
     partes = await readMultipartFormData(event)
@@ -39,17 +50,23 @@ export default defineEventHandler(async event => {
   // 1. expande os ZIPs; o resto entra como veio
   const candidatos: { original: string; dados: Uint8Array }[] = []
   const recusados: Recusado[] = []
+  // quantos arquivos havia em cada ZIP (sem pastas e lixo de sistema), para a
+  // tela conferir "42 no ZIP = 40 lidos + 2 com erro"
+  const zips: { nome: string; arquivos: number }[] = []
   let total = 0
 
   for (const p of enviados) {
     const original = basename(p.filename!)
     if (/\.zip$/i.test(original)) {
+      const zip = { nome: original, arquivos: 0 }
+      zips.push(zip)
       try {
         const dentro = unzipSync(new Uint8Array(p.data), {
           filter: f => {
             const nome = basename(f.name)
             // pastas, lixo do macOS e arquivos ocultos
             if (!nome || f.name.endsWith('/') || f.name.includes('__MACOSX') || nome.startsWith('.')) return false
+            zip.arquivos++
             if (f.originalSize > MAX_POR_ARQUIVO) {
               recusados.push({ original: `${original} › ${nome}`, motivo: 'maior que 25 MB' })
               return false
@@ -97,7 +114,13 @@ export default defineEventHandler(async event => {
     } catch (err) {
       throw falhar(event, 'gravacao dos arquivos no storage', err)
     }
-    aceitos.push({ nome, original: c.original, tamanho: c.dados.length, tipo: tipo.rotulo })
+    const aceito: Aceito = { nome, original: c.original, tamanho: c.dados.length, tipo: tipo.rotulo }
+    if (lerDocumento) {
+      const achado = documentosNoArquivo(c.original, c.dados)
+      aceito.documentos = achado.documentos
+      aceito.docOrigem = achado.origem
+    }
+    aceitos.push(aceito)
   }
 
   await auditar(event, 'arquivo.enviar_individuais', {
@@ -106,5 +129,5 @@ export default defineEventHandler(async event => {
     dados: { aceitos: aceitos.length, recusados, bytes: aceitos.reduce((s, a) => s + a.tamanho, 0) }
   })
 
-  return { aceitos, recusados }
+  return { aceitos, recusados, zips }
 })

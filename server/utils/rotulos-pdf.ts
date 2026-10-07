@@ -11,5 +11,6 @@ export const ROTULO_EVENTO_PDF: Record<string, string> = {
   devolucao: 'Devolução',
   recibo: 'Recibo de leitura',
   auto_resposta: 'Resposta automática',
-  resposta: 'Respondeu'
+  resposta: 'Respondeu',
+  campos: 'Preencheu os campos'
 }

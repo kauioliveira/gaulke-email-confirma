@@ -15,7 +15,7 @@ type Linha = { documento?: string | null; email: string; nome?: string | null; e
  * Soma um uso para cada par documento + e-mail. Nunca lanca: o envio ja
  * aconteceu e o aprendizado e um extra.
  */
-export async function registrarContatosEmpresa(linhas: Linha[], origem: 'lote' | 'solicitacao') {
+export async function registrarContatosEmpresa(linhas: Linha[], origem: 'lote' | 'solicitacao' | 'importacao') {
   const validas = new Map<string, typeof empresaContatos.$inferInsert>()
   for (const l of linhas) {
     const documento = (l.documento || '').replace(/\D/g, '')
@@ -87,4 +87,54 @@ export async function empresasDoHistorico(termo: string, porDoc: string | null, 
             or (${porDoc}::text is not null and documento like ${porDoc}))
      order by documento, ultimo_uso desc
      limit ${limite}`
+}
+
+export type CadastroDoDocumento = { nome: string; fantasia: string | null; ativo: boolean; origem: 'cadastro' | 'historico' }
+
+/**
+ * Quem e o dono de cada CPF/CNPJ: `company`, depois `client`, por ultimo o
+ * historico de envios. SOMENTE LEITURA nas tabelas do outro sistema (veja
+ * empresas.get.ts). Documento sem cadastro nenhum fica fora do mapa.
+ */
+export async function cadastrosDosDocumentos(documentos: string[]) {
+  const docs = [...new Set(documentos.filter(d => d.length === 11 || d.length === 14))]
+  const mapa = new Map<string, CadastroDoDocumento>()
+  if (!docs.length) return mapa
+  const sql = useSql()
+
+  const empresas = await sql<{ doc: string; nome: string; fantasia: string | null; ativo: boolean | null }[]>`
+    select regexp_replace(cnpj, '\\D', '', 'g') as doc, corporate_name as nome,
+           nullif(trim(trade_name), '') as fantasia, is_active as ativo
+      from company
+     where regexp_replace(coalesce(cnpj, ''), '\\D', '', 'g') = any(${docs})
+     order by coalesce(is_active, true)`
+  // ordenado do inativo para o ativo: o ativo sobrescreve
+  for (const e of empresas) {
+    mapa.set(e.doc, { nome: e.nome, fantasia: e.fantasia && e.fantasia !== e.nome ? e.fantasia : null, ativo: e.ativo ?? true, origem: 'cadastro' })
+  }
+
+  const faltam = docs.filter(d => !mapa.has(d))
+  if (faltam.length) {
+    const pessoas = await sql<{ doc: string; nome: string; ativo: boolean }[]>`
+      select regexp_replace(cnpj_cpf, '\\D', '', 'g') as doc, name as nome,
+             coalesce(is_active, true) and not coalesce(is_deceased, false) as ativo
+        from client
+       where regexp_replace(coalesce(cnpj_cpf, ''), '\\D', '', 'g') = any(${faltam})
+       order by coalesce(is_active, true)`
+    for (const p of pessoas) mapa.set(p.doc, { nome: p.nome, fantasia: null, ativo: p.ativo, origem: 'cadastro' })
+  }
+
+  const doHistorico = docs.filter(d => !mapa.has(d))
+  if (doHistorico.length) {
+    const linhas = await sql<{ documento: string; empresa: string | null; nome: string | null }[]>`
+      select distinct on (documento) documento, empresa, nome
+        from sys_mail_empresa_contatos
+       where documento = any(${doHistorico}) and removido_em is null
+       order by documento, ultimo_uso desc`
+    for (const h of linhas) {
+      const nome = h.empresa || h.nome
+      if (nome) mapa.set(h.documento, { nome, fantasia: null, ativo: true, origem: 'historico' })
+    }
+  }
+  return mapa
 }

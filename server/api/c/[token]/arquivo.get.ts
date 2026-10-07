@@ -6,6 +6,7 @@ import { registrarEventoDoRequest } from '../../../utils/tracking'
 import { foraDaLixeira } from '../../../utils/lotes'
 import { caminhoNoStorage } from '../../../utils/storage'
 import { mimeDoArquivo } from '../../../../shared/types/tipos-arquivo'
+import { exigirCamposPreenchidos } from '../../../utils/lote-campos'
 
 /**
  * Download rastreado. O arquivo fica FORA de public/ justamente para que a
@@ -18,6 +19,7 @@ export default defineEventHandler(async event => {
     await useDb()
       .select({
         id: recipients.id,
+        batchId: recipients.batchId,
         confirmedAt: recipients.confirmedAt,
         // anexo individual: o arquivo DESTA pessoa vale mais que o do lote. As
         // colunas vao qualificadas a mao: as duas tabelas tem arquivo_path e
@@ -39,6 +41,8 @@ export default defineEventHandler(async event => {
   if (linha.exigirConfirmacao === 'true' && !linha.confirmedAt) {
     throw createError({ statusCode: 403, statusMessage: 'Confirme a leitura antes de baixar' })
   }
+  // campo obrigatorio da pagina: vale mesmo sem a exigencia de confirmacao
+  await exigirCamposPreenchidos(linha.batchId, linha.id)
 
   const caminho = caminhoNoStorage(linha.arquivoPath)
   const info = await stat(caminho).catch(() => null)

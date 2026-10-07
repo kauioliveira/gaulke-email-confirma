@@ -126,6 +126,23 @@ const MARCOS = computed(() => [
           />
         </UCard>
 
+        <!-- O que o cliente preencheu na página de download -->
+        <UCard v-if="data.campos?.some(c => c.tipo !== 'informativo')">
+          <template #header><h2 class="font-semibold">Informações preenchidas pelo cliente</h2></template>
+          <dl class="divide-y divide-default text-sm">
+            <div v-for="c in data.campos.filter(c => c.tipo !== 'informativo')" :key="c.id" class="grid gap-1 py-2 sm:grid-cols-[220px_1fr]">
+              <dt class="text-muted">{{ c.titulo }}<span v-if="c.obrigatorio" class="text-error"> *</span></dt>
+              <dd>
+                <template v-if="c.resposta">
+                  <span class="whitespace-pre-line">{{ c.resposta.exibicao }}</span>
+                  <span class="ml-2 text-xs text-muted">{{ dataHora(c.respondidoEm) }}</span>
+                </template>
+                <span v-else class="text-muted">— sem resposta</span>
+              </dd>
+            </div>
+          </dl>
+        </UCard>
+
         <!-- Envios: o original e cada reenvio, numerados -->
         <UCard>
           <template #header>

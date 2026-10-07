@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { useDb, recipients, batches } from '../../../db'
 import { registrarEventoDoRequest } from '../../../utils/tracking'
 import { foraDaLixeira } from '../../../utils/lotes'
+import { camposComRespostas } from '../../../utils/lote-campos'
 
 /** Dados da landing page. Registra o evento de ACESSO (sinal confiavel). */
 export default defineEventHandler(async event => {
@@ -12,6 +13,7 @@ export default defineEventHandler(async event => {
     await db
       .select({
         id: recipients.id,
+        batchId: recipients.batchId,
         nome: recipients.nome,
         empresa: recipients.empresa,
         codigo: recipients.codigo,
@@ -48,6 +50,8 @@ export default defineEventHandler(async event => {
     exigirConfirmacao: linha.exigirConfirmacao === 'true',
     confirmado: !!linha.confirmedAt,
     confirmadoEm: linha.confirmedAt,
-    downloads: linha.downloadCount
+    downloads: linha.downloadCount,
+    // o que o cliente preenche antes de baixar (vazio = so confirmar)
+    campos: await camposComRespostas(linha.batchId, linha.id)
   }
 })

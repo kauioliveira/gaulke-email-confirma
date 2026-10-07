@@ -3,6 +3,7 @@ import { useDb, recipients, batches } from '../../../db'
 import { registrarEventoDoRequest } from '../../../utils/tracking'
 import { foraDaLixeira } from '../../../utils/lotes'
 import { emitirWebhook } from '../../../utils/webhooks'
+import { camposComRespostas, exigirCamposPreenchidos } from '../../../utils/lote-campos'
 
 /** Confirmacao explicita de leitura — esta e a prova real, com IP e horario. */
 export default defineEventHandler(async event => {
@@ -30,6 +31,9 @@ export default defineEventHandler(async event => {
   // idempotente: reconfirmar nao sobrescreve o primeiro aceite
   if (r.confirmedAt) return { ok: true, confirmadoEm: r.confirmedAt, jaConfirmado: true }
 
+  // a ciencia vale junto com o que o cliente informou: sem os obrigatorios, nao confirma
+  await exigirCamposPreenchidos(r.loteId, r.id)
+
   await registrarEventoDoRequest(event, r.id, 'confirmacao', { aceite: 'Li e estou ciente' })
   const atualizado = (
     await useDb()
@@ -45,6 +49,9 @@ export default defineEventHandler(async event => {
       codigo: r.codigo,
       destinatario: { nome: r.nome, email: r.email, empresa: r.empresa, documento: r.documento },
       lote: { id: r.loteId, nome: r.loteNome },
+      campos: (await camposComRespostas(r.loteId, r.id))
+        .filter(c => c.resposta)
+        .map(c => ({ titulo: c.titulo, tipo: c.tipo, resposta: c.resposta!.exibicao })),
       confirmadoEm: atualizado?.confirmedAt ?? null
     },
     `/admin/destinatario/${r.id}`

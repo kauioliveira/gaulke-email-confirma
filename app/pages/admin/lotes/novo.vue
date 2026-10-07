@@ -6,6 +6,8 @@ import {
   iconeDoArquivo as iconePorExtensao
 } from '~~/shared/types/tipos-arquivo'
 import { tamanho, duracao } from '~/utils/formato'
+import { normalizarConfig } from '~~/shared/utils/itens-solic'
+import { destinatariosDasLinhas, nomeDoLotePeloArquivo, type LinhaArquivo } from '~/utils/lote-arquivos'
 import {
   FORMATOS_NOME,
   AMOSTRA_NOME,
@@ -16,24 +18,58 @@ import {
   type FormatoNome
 } from '~/utils/nomes'
 
-definePageMeta({ layout: 'admin', middleware: 'admin' })
-useHead({ title: 'Novo envio — Gaulke Comunica' })
+// a chave pela URL remonta a página ao trocar entre envio comum e "arquivos por cliente"
+definePageMeta({ layout: 'admin', middleware: 'admin', key: r => r.fullPath })
 
 const toast = useToast()
 // canais de saida sao geridos so por admin; os demais apenas escolhem
 const { eAdmin } = usePapel()
+const route = useRoute()
+/**
+ * /admin/lotes/novo?origem=arquivos: o lote "arquivos por cliente" começa
+ * pelo ZIP — os destinatários saem do CNPJ de cada arquivo (LoteArquivos).
+ * Os passos de e-mail e revisão são os mesmos do envio comum.
+ */
+const porArquivos = route.query.origem === 'arquivos'
+useHead({ title: porArquivos ? 'Arquivos por cliente — Gaulke Comunica' : 'Novo envio — Gaulke Comunica' })
 const passo = ref(1)
-const PASSOS = [
-  { n: 1, titulo: 'Lista', icone: 'i-lucide-users' },
-  { n: 2, titulo: 'Arquivo', icone: 'i-lucide-file-text' },
-  { n: 3, titulo: 'E-mail', icone: 'i-lucide-mail' },
-  { n: 4, titulo: 'Revisão', icone: 'i-lucide-rocket' }
-]
+const PASSOS = porArquivos
+  ? [
+      { n: 1, titulo: 'Template e arquivos', icone: 'i-lucide-folder-archive' },
+      { n: 2, titulo: 'Página de download', icone: 'i-lucide-text-cursor-input' },
+      { n: 3, titulo: 'Revisar e-mail', icone: 'i-lucide-mail' },
+      { n: 4, titulo: 'Revisão', icone: 'i-lucide-rocket' }
+    ]
+  : [
+      { n: 1, titulo: 'Lista', icone: 'i-lucide-users' },
+      { n: 2, titulo: 'Arquivo', icone: 'i-lucide-file-text' },
+      { n: 3, titulo: 'E-mail', icone: 'i-lucide-mail' },
+      { n: 4, titulo: 'Revisão', icone: 'i-lucide-rocket' }
+    ]
 
 /* ---------- Passo 1: lista (SeletorDestinatarios) ---------- */
 // "Usar num envio", da tela da lista: /admin/lotes/novo?lista=12
-const route = useRoute()
 const listaInicial = Number(route.query.lista) || undefined
+
+/* ---------- Passo 1 do "arquivos por cliente": um arquivo por linha ---------- */
+const linhasArquivos = ref<LinhaArquivo[]>([])
+const destinatariosArquivos = computed(() => destinatariosDasLinhas(linhasArquivos.value))
+/** o nome do lote nasce do ZIP; depois de editado pela pessoa, não muda mais */
+const nomeEditado = ref(false)
+function sugerirNomeLote(arquivo: string) {
+  if (!nomeEditado.value) nomeLote.value = nomeDoLotePeloArquivo(arquivo)
+}
+
+/* ---------- campos da página do cliente (preenchidos antes de baixar) ---------- */
+const camposPagina = ref<ItemModeloChecklist[]>([])
+const erroCampos = computed(() => {
+  for (const [i, c] of camposPagina.value.entries()) {
+    if (c.tipo !== 'informativo' && !c.titulo.trim()) return `Dê um nome ao campo ${i + 1}.`
+    const r = normalizarConfig(c.tipo, c.config)
+    if (!r.ok) return `Campo ${i + 1}: ${r.erro}`
+  }
+  return null
+})
 
 /* ---------- O carrinho: todas as origens somam no mesmo lote ---------- */
 /**
@@ -63,7 +99,7 @@ function exemploNome(f: FormatoNome) {
 const exemploEmpresa = (f: FormatoNome) => formatarNome(AMOSTRA_EMPRESA, f)
 
 const listaProcessada = computed(() => ({
-  validos: Object.values(carrinho.value).map(d =>
+  validos: (porArquivos ? destinatariosArquivos.value : Object.values(carrinho.value)).map(d =>
     formatarDestinatario(d, {
       nome: formatoNome.value,
       empresa: formatoEmpresa.value,
@@ -73,7 +109,7 @@ const listaProcessada = computed(() => ({
   rejeitados: [] as { linha: number; email: string; motivo: string }[]
 }))
 
-const totalCarrinho = computed(() => Object.keys(carrinho.value).length)
+const totalCarrinho = computed(() => (porArquivos ? destinatariosArquivos.value.length : Object.keys(carrinho.value).length))
 /** para a tabela do seletor mostrar o nome ja padronizado */
 const listaFormatada = computed(() => new Map(listaProcessada.value.validos.map(d => [d.email, d])))
 
@@ -164,7 +200,7 @@ function removerAnexo() {
 
 /* ---------- modo do anexo: nenhum | único | individual ---------- */
 type ModoAnexo = 'nenhum' | 'unico' | 'individual'
-const modoAnexo = ref<ModoAnexo>('nenhum')
+const modoAnexo = ref<ModoAnexo>(porArquivos ? 'individual' : 'nenhum')
 const MODOS_ANEXO: { valor: ModoAnexo; titulo: string; texto: string; icone: string }[] = [
   { valor: 'nenhum', titulo: 'Sem anexo', texto: 'Só um aviso (comunicado).', icone: 'i-lucide-megaphone' },
   { valor: 'unico', titulo: 'Um arquivo para todos', texto: 'O mesmo documento para a lista inteira.', icone: 'i-lucide-file' },
@@ -190,6 +226,7 @@ function escolherModoAnexo(m: ModoAnexo) {
 }
 // o botão de acesso é obrigatório também no individual
 watch(totalComArquivo, n => { if (n && modoAnexo.value === 'individual') garantirBotaoDeAcesso() })
+watch(() => destinatariosArquivos.value.length, n => { if (n) garantirBotaoDeAcesso() })
 
 /* ---------- Passo 3: e-mail ---------- */
 const { data: templatesData } = await useFetch<RespostaTemplates>(api('/api/admin/templates'))
@@ -225,7 +262,9 @@ function aplicarTemplate(id: number | null) {
   const bs = (t as any).blocos
   blocosEmail.value = Array.isArray(bs) && bs.length ? JSON.parse(JSON.stringify(bs)) : blocosPadraoCliente()
 }
-if (templatesData.value?.templates.length) aplicarTemplate(templatesData.value.templates[0]!.id)
+// no "arquivos por cliente" a pessoa escolhe o template de propósito, antes do ZIP
+if (!porArquivos && templatesData.value?.templates.length) aplicarTemplate(templatesData.value.templates[0]!.id)
+const templateEscolhido = computed(() => templatesData.value?.templates.find(t => t.id === templateId.value) ?? null)
 
 const opcoesTemplates = computed(() =>
   (templatesData.value?.templates || []).map(t => ({
@@ -235,7 +274,7 @@ const opcoesTemplates = computed(() =>
 )
 
 /* ---------- Passo 4: revisão ---------- */
-const nomeLote = ref(`Envio ${formatarData(new Date())}`)
+const nomeLote = ref(porArquivos ? '' : `Envio ${formatarData(new Date())}`)
 const intervaloSegundos = ref(10)
 const exigirConfirmacao = ref(true)
 const pedirRecibo = ref(false)
@@ -299,7 +338,8 @@ const tempoEstimado = computed(() =>
 )
 
 const podeAvancar = computed(() => {
-  if (passo.value === 1) return totalCarrinho.value > 0
+  if (passo.value === 1) return totalCarrinho.value > 0 && (!porArquivos || (!!nomeLote.value.trim() && !!templateId.value))
+  if (passo.value === 2 && porArquivos) return !erroCampos.value
   if (passo.value === 2) {
     if (modoAnexo.value === 'unico') return !!arquivoNome.value
     if (modoAnexo.value === 'individual') {
@@ -391,6 +431,19 @@ const dominiosSemEmail = ref(0)
 
 /** Troca o domínio em todos os e-mails afetados (a chave do carrinho é o e-mail). */
 function corrigirDominio(de: string, para: string) {
+  if (porArquivos) {
+    let trocados = 0
+    linhasArquivos.value = linhasArquivos.value.map(l => ({
+      ...l,
+      emails: l.emails.map(e => {
+        if (!e.email.endsWith(`@${de}`)) return e
+        trocados++
+        return { ...e, email: `${e.email.slice(0, -de.length)}${para}`, manual: true }
+      })
+    }))
+    toast.add({ title: `${trocados} e-mail(s) corrigido(s) para @${para}`, color: 'success', icon: 'i-lucide-wand-sparkles' })
+    return
+  }
   const novo: Record<string, Item> = {}
   let trocados = 0
   for (const [email, item] of Object.entries(carrinho.value)) {
@@ -407,6 +460,14 @@ function corrigirDominio(de: string, para: string) {
 }
 function removerEmails(emails: string[]) {
   const fora = new Set(emails)
+  if (porArquivos) {
+    linhasArquivos.value = linhasArquivos.value.map(l => ({
+      ...l,
+      emails: l.emails.map(e => (fora.has(e.email) ? { ...e, marcado: false } : e))
+    }))
+    toast.add({ title: `${emails.length} e-mail(s) desmarcado(s)`, color: 'success' })
+    return
+  }
   carrinho.value = Object.fromEntries(Object.entries(carrinho.value).filter(([e]) => !fora.has(e)))
   toast.add({ title: `${emails.length} destinatário(s) removido(s) da lista`, color: 'success' })
 }
@@ -437,8 +498,9 @@ const resumoEnvio = computed(() => ({
   remetente: contaEscolhida.value?.remetente ?? null,
   responderPara: responderPara.value ?? contaEscolhida.value?.responderPara ?? null,
   destinatarios: listaProcessada.value.validos.length,
-  anexo:
-    modoAnexo.value === 'individual'
+  anexo: porArquivos
+    ? `Um arquivo por cliente: ${new Set(destinatariosArquivos.value.map(d => d.arquivoNome)).size} arquivo(s)${camposPagina.value.length ? ` · ${camposPagina.value.length} campo(s) na página` : ''}`
+    : modoAnexo.value === 'individual'
       ? `Individual: ${totalComArquivo.value} com arquivo${casamento.value.semArquivo.length ? `, ${casamento.value.semArquivo.length} sem arquivo (vão sem anexo)` : ''}`
       : arquivoOriginal.value || null,
   quando: (agendadoParaISO.value ? 'agendado' : 'rascunho') as 'agendado' | 'rascunho',
@@ -480,9 +542,11 @@ async function criarLote() {
         lembrete: lembreteDoEnvio.value,
         agendadoPara: agendadoParaISO.value,
         modoAnexo: modoAnexo.value,
-        enviarSemArquivo: enviarSemArquivo.value,
-        // no individual, cada destinatário leva o arquivo dele
-        destinatarios: listaProcessada.value.validos.map(d => {
+        enviarSemArquivo: porArquivos ? false : enviarSemArquivo.value,
+        campos: porArquivos ? camposPagina.value.map(c => ({ tipo: c.tipo, titulo: c.titulo, instrucao: c.instrucao, obrigatorio: c.obrigatorio, config: c.config })) : [],
+        // no individual, cada destinatário leva o arquivo dele; no "arquivos
+        // por cliente" o arquivo já vem em cada destinatário
+        destinatarios: porArquivos ? listaProcessada.value.validos : listaProcessada.value.validos.map(d => {
           const c = modoAnexo.value === 'individual' ? casamento.value.casados[d.email] : undefined
           return c ? { ...d, arquivoNome: c.arquivo.nome, arquivoOriginal: c.arquivo.original } : d
         })
@@ -510,9 +574,25 @@ async function criarLote() {
 <template>
   <div class="space-y-6">
     <div>
-      <h1 class="text-2xl font-semibold">Novo envio</h1>
-      <p class="text-sm text-muted">Importe a lista, escolha o documento e revise o e-mail antes de disparar.</p>
+      <h1 class="text-2xl font-semibold">{{ porArquivos ? 'Enviar arquivos por cliente' : 'Novo envio' }}</h1>
+      <p class="text-sm text-muted">
+        {{
+          porArquivos
+            ? 'Suba o ZIP com um arquivo para cada cliente: o sistema acha o CNPJ, busca o e-mail e cada um recebe o seu, com link e código próprios.'
+            : 'Importe a lista, escolha o documento e revise o e-mail antes de disparar.'
+        }}
+      </p>
     </div>
+
+    <UAlert
+      v-if="!porArquivos && passo === 1"
+      color="neutral"
+      variant="subtle"
+      icon="i-lucide-folder-archive"
+      title="Tem um arquivo para cada cliente num ZIP?"
+      description="Use o envio de arquivos por cliente: o sistema lê o CNPJ de cada arquivo e monta a lista sozinho."
+      :actions="[{ label: 'Enviar arquivos por cliente', to: '/admin/lotes/novo?origem=arquivos', icon: 'i-lucide-arrow-right', color: 'neutral', variant: 'outline' }]"
+    />
 
     <!-- Trilha de passos -->
     <div class="flex flex-wrap items-center gap-2">
@@ -529,8 +609,71 @@ async function criarLote() {
       </template>
     </div>
 
+    <!-- PASSO 1 (arquivos por cliente) -->
+    <UCard v-if="porArquivos" v-show="passo === 1">
+      <template #header><h2 class="font-semibold">1. Template e arquivos</h2></template>
+      <div class="space-y-5">
+        <!-- a) o e-mail que cada cliente recebe -->
+        <div class="rounded-lg border border-default p-4">
+          <p class="mb-1 text-sm font-semibold">a) Template do e-mail</p>
+          <p class="mb-3 text-xs text-muted">
+            É o e-mail que cada cliente recebe, com o botão que leva ao arquivo dele. Você pode ajustar o texto no passo 3.
+          </p>
+          <USelect
+            :model-value="templateId ?? undefined"
+            :items="opcoesTemplates"
+            placeholder="Escolha o template…"
+            class="w-full"
+            @update:model-value="aplicarTemplate($event as number)"
+          />
+          <p v-if="templateEscolhido" class="mt-2 text-xs text-muted">
+            Assunto: <span class="font-medium text-default">{{ assunto }}</span>
+          </p>
+          <p v-else-if="!opcoesTemplates.length" class="mt-2 text-xs text-warning">
+            Nenhum template cadastrado — crie um em Templates.
+          </p>
+        </div>
+
+        <p class="text-sm font-semibold">b) Nome do lote e arquivos</p>
+        <UFormField
+          label="Nome do lote"
+          required
+          help="É como o envio aparece no relatório e na página do cliente. Ex.: Relatório do Imobilizado — 08/2026."
+        >
+          <UInput
+            v-model="nomeLote"
+            placeholder="Ex.: Relatório do Imobilizado — 08/2026"
+            class="w-full"
+            @update:model-value="nomeEditado = true"
+          />
+        </UFormField>
+        <LoteArquivos
+          v-model="linhasArquivos"
+          :bloqueado="templateId ? null : 'Escolha o template do e-mail acima para liberar o envio do ZIP.'"
+          @primeiro-arquivo="sugerirNomeLote"
+        />
+      </div>
+    </UCard>
+
+    <!-- PASSO 2 (arquivos por cliente): o que o cliente preenche antes de baixar -->
+    <UCard v-if="porArquivos" v-show="passo === 2">
+      <template #header><h2 class="font-semibold">2. Página de download</h2></template>
+      <div class="space-y-5">
+        <p class="text-sm text-muted">
+          Não é o e-mail: é a página que abre quando o cliente clica no botão do e-mail. Nela ele confirma a leitura e
+          baixa o arquivo dele — com abertura, confirmação e download registrados.
+        </p>
+        <p class="text-sm text-muted">
+          Se precisar que ele informe algo antes de baixar, adicione campos abaixo (opcional). Os <b>obrigatórios</b>
+          precisam ser preenchidos para liberar o download. Sem campos, a página só pede a confirmação de leitura.
+        </p>
+        <EditorItensSolic v-model="camposPagina" sem-documento />
+        <UAlert v-if="erroCampos" color="error" variant="subtle" icon="i-lucide-circle-alert" :description="erroCampos" />
+      </div>
+    </UCard>
+
     <!-- PASSO 1 -->
-    <UCard v-show="passo === 1">
+    <UCard v-if="!porArquivos" v-show="passo === 1">
       <template #header><h2 class="font-semibold">1. Lista de destinatários</h2></template>
 
       <div class="space-y-5">
@@ -597,7 +740,7 @@ async function criarLote() {
     </UCard>
 
     <!-- PASSO 2 -->
-    <UCard v-show="passo === 2">
+    <UCard v-if="!porArquivos" v-show="passo === 2">
       <template #header><h2 class="font-semibold">2. Anexo</h2></template>
 
       <div class="space-y-5">
@@ -711,7 +854,9 @@ async function criarLote() {
 
     <!-- PASSO 3 -->
     <UCard v-show="passo === 3">
-      <template #header><h2 class="font-semibold">3. Conteúdo do e-mail</h2></template>
+      <template #header>
+        <h2 class="font-semibold">{{ porArquivos ? '3. Revisar o e-mail (template)' : '3. Conteúdo do e-mail' }}</h2>
+      </template>
 
       <div class="space-y-4">
         <div class="grid gap-4 sm:grid-cols-2">
@@ -734,7 +879,7 @@ async function criarLote() {
           v-model:html="html"
           :assunto="assunto"
           :arquivos="arquivosBrand"
-          :exige-botao="!!arquivoNome"
+          :exige-botao="!!arquivoNome || porArquivos"
           @imagem-enviada="recarregarImagens"
         />
       </div>
@@ -753,8 +898,8 @@ async function criarLote() {
         />
 
         <div class="grid gap-4 sm:grid-cols-2">
-          <UFormField label="Nome do lote" help="Para você identificar no relatório.">
-            <UInput v-model="nomeLote" class="w-full" />
+          <UFormField label="Nome do lote" help="Para você identificar no relatório." :required="porArquivos">
+            <UInput v-model="nomeLote" class="w-full" @update:model-value="nomeEditado = true" />
           </UFormField>
           <UFormField label="Intervalo entre os envios" help="Intervalos maiores reduzem o risco de cair em spam.">
             <USelect v-model="intervaloSegundos" :items="OPCOES_INTERVALO" class="w-full" />
@@ -861,7 +1006,9 @@ async function criarLote() {
           </div>
           <div class="rounded-lg border border-default p-3">
             <p class="text-xs text-muted">Documento</p>
-            <p class="truncate text-sm font-medium">{{ arquivoOriginal || 'nenhum' }}</p>
+            <p class="truncate text-sm font-medium">
+              {{ porArquivos ? `${new Set(destinatariosArquivos.map(d => d.arquivoNome)).size} arquivo(s), um por cliente` : arquivoOriginal || 'nenhum' }}
+            </p>
           </div>
         </div>
 
@@ -958,7 +1105,7 @@ async function criarLote() {
         :label="quandoDisparar === 'agendar' ? 'Agendar lote' : 'Criar lote'"
         :icon="quandoDisparar === 'agendar' ? 'i-lucide-calendar-clock' : 'i-lucide-rocket'"
         :loading="criando"
-        :disabled="!listaProcessada.validos.length || !agendamentoValido || respostaInvalida"
+        :disabled="!listaProcessada.validos.length || !agendamentoValido || respostaInvalida || (porArquivos && !nomeLote.trim())"
         @click="confirmando = true"
       />
     </div>

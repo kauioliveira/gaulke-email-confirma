@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { iconeDoArquivo } from "~~/shared/types/tipos-arquivo";
+import {
+  validarResposta,
+  respostaParaEntrada,
+  entradaVazia,
+  ehInformativo,
+  classesInformativo,
+} from "~~/shared/utils/itens-solic";
 
 /**
  * Página sempre clara, independente do tema do aparelho de quem recebe.
@@ -30,16 +37,101 @@ const ciente = ref(false);
 const confirmando = ref(false);
 const baixando = ref(false);
 const confirmado = computed(() => !!data.value?.confirmado);
+
+/* ---------- campos pedidos pelo escritório (opcional, por lote) ---------- */
+/**
+ * O que a pessoa digita fica aqui, e vai ao servidor de uma vez ao confirmar
+ * (ou ao baixar, quando o lote não exige confirmação). O servidor confere de
+ * novo e recusa a confirmação e o download sem os obrigatórios.
+ */
+const campos = computed(() => data.value?.campos ?? []);
+const camposResposta = computed(() => campos.value.filter((c) => !ehInformativo(c)));
+const rascunhos = reactive<Record<number, unknown>>({});
+const errosCampo = reactive<Record<number, string | null>>({});
+watch(
+  campos,
+  (cs) => {
+    for (const c of cs) {
+      if (ehInformativo(c) || c.id in rascunhos) continue;
+      rascunhos[c.id] = respostaParaEntrada(c.tipo, c.resposta);
+    }
+  },
+  { immediate: true },
+);
+// depois da confirmação as respostas viram prova: não se editam mais
+const camposTravados = computed(() => confirmado.value);
+const faltamObrigatorios = computed(() =>
+  camposResposta.value.filter(
+    (c) => c.obrigatorio && entradaVazia(c.tipo, rascunhos[c.id]),
+  ),
+);
+const salvandoCampos = ref(false);
+
+/** Valida na tela e grava. Devolve false se algo precisa ser corrigido. */
+async function salvarCampos() {
+  if (!camposResposta.value.length || camposTravados.value) return true;
+  let ok = true;
+  for (const c of camposResposta.value) {
+    const v = validarResposta(c.tipo, c.config, rascunhos[c.id]);
+    const falta = c.obrigatorio && entradaVazia(c.tipo, rascunhos[c.id]);
+    errosCampo[c.id] = !v.ok ? v.erro : falta ? "Campo obrigatório." : null;
+    if (errosCampo[c.id]) ok = false;
+  }
+  if (!ok) {
+    toast.add({
+      title: "Confira os campos destacados",
+      color: "warning",
+      icon: "i-lucide-circle-alert",
+    });
+    return false;
+  }
+  salvandoCampos.value = true;
+  try {
+    const r = await $fetch<{ erros: Record<number, string>; campos: CampoLote[] }>(
+      api(`/api/c/${token}/respostas`),
+      {
+        method: "PUT",
+        body: {
+          respostas: camposResposta.value.map((c) => ({
+            campoId: c.id,
+            valor: rascunhos[c.id],
+          })),
+        },
+      },
+    );
+    for (const c of camposResposta.value) errosCampo[c.id] = r.erros[c.id] ?? null;
+    // shallowRef: troca o objeto inteiro (veja confirmar)
+    if (data.value) data.value = { ...data.value, campos: r.campos };
+    return !Object.keys(r.erros).length;
+  } catch (e: any) {
+    toast.add({
+      title: "Não foi possível salvar as respostas",
+      description: e?.data?.statusMessage,
+      color: "error",
+    });
+    return false;
+  } finally {
+    salvandoCampos.value = false;
+  }
+}
+
 const podeBaixar = computed(
   () =>
     !!data.value?.temArquivo &&
     (!data.value.exigirConfirmacao || confirmado.value),
 );
 
+/** numeração das etapas: os campos só aparecem quando o lote pede */
+const etapa = computed(() => {
+  const n = camposResposta.value.length ? 1 : 0;
+  return { campos: 1, ciencia: 1 + n, documento: 2 + n };
+});
+
 async function confirmar() {
   if (!ciente.value || confirmando.value) return;
   confirmando.value = true;
   try {
+    if (!(await salvarCampos())) return;
     const r = await $fetch<{ confirmadoEm: string }>(
       api(`/api/c/${token}/confirmar`),
       { method: "POST" },
@@ -68,14 +160,20 @@ async function confirmar() {
       icon: "i-lucide-badge-check",
       color: "success",
     });
-  } catch {
-    toast.add({ title: "Não foi possível confirmar", color: "error" });
+  } catch (e: any) {
+    toast.add({
+      title: "Não foi possível confirmar",
+      description: e?.data?.statusMessage,
+      color: "error",
+    });
   } finally {
     confirmando.value = false;
   }
 }
 
-function baixar() {
+async function baixar() {
+  // sem exigência de confirmação, os campos são gravados aqui
+  if (!(await salvarCampos())) return;
   baixando.value = true;
   // navegacao direta: o servidor registra o download e devolve o PDF
   window.location.href = api(`/api/c/${token}/arquivo`);
@@ -171,9 +269,54 @@ const whatsapp = computed(() => {
               </p>
             </div>
 
-            <!-- Passo 1: ciencia -->
+            <!-- Passo 1 (opcional): o que o escritório pediu para preencher -->
+            <template v-if="camposResposta.length">
+              <div>
+                <p class="mb-1 text-sm font-medium">
+                  {{ etapa.campos }}. Informações solicitadas
+                </p>
+                <p class="mb-4 text-xs text-muted">
+                  Os campos marcados com * são obrigatórios para liberar o
+                  documento.
+                </p>
+                <div class="space-y-5">
+                  <template v-for="c in campos" :key="c.id">
+                    <section v-if="ehInformativo(c)">
+                      <h3 v-if="c.titulo" class="mb-1.5 font-semibold">
+                        {{ c.titulo }}
+                      </h3>
+                      <div class="text-sm" :class="classesInformativo(c.config)">
+                        {{ c.config.texto }}
+                      </div>
+                    </section>
+                    <section v-else>
+                      <p class="text-sm font-medium">
+                        {{ c.titulo
+                        }}<span v-if="c.obrigatorio" class="text-error"> *</span>
+                      </p>
+                      <p v-if="c.instrucao" class="mb-2 text-xs text-muted">
+                        {{ c.instrucao }}
+                      </p>
+                      <RespostaItemSolic
+                        v-model="rascunhos[c.id]"
+                        :item="c"
+                        :desabilitado="camposTravados"
+                        :erro="errosCampo[c.id]"
+                        class="mt-2"
+                        @update:model-value="errosCampo[c.id] = null"
+                      />
+                    </section>
+                  </template>
+                </div>
+              </div>
+              <USeparator />
+            </template>
+
+            <!-- ciencia -->
             <div>
-              <p class="mb-3 text-sm font-medium">1. Confirmação de leitura</p>
+              <p class="mb-3 text-sm font-medium">
+                {{ etapa.ciencia }}. Confirmação de leitura
+              </p>
 
               <UAlert
                 v-if="confirmado"
@@ -195,10 +338,16 @@ const whatsapp = computed(() => {
                   icon="i-lucide-check"
                   size="lg"
                   block
-                  :disabled="!ciente"
+                  :disabled="!ciente || faltamObrigatorios.length > 0"
                   :loading="confirmando"
                   @click="confirmar"
                 />
+                <p
+                  v-if="faltamObrigatorios.length"
+                  class="text-center text-xs text-muted"
+                >
+                  Preencha os campos obrigatórios acima para confirmar.
+                </p>
               </div>
             </div>
 
@@ -213,7 +362,9 @@ const whatsapp = computed(() => {
 
               <!-- Passo 2: download -->
               <div>
-                <p class="mb-3 text-sm font-medium">2. Documento</p>
+                <p class="mb-3 text-sm font-medium">
+                  {{ etapa.documento }}. Documento
+                </p>
 
                 <div
                   class="mb-4 flex items-center gap-3 rounded-lg border border-default p-3"
@@ -242,15 +393,19 @@ const whatsapp = computed(() => {
                   size="lg"
                   color="primary"
                   block
-                  :disabled="!podeBaixar"
-                  :loading="baixando"
+                  :disabled="!podeBaixar || faltamObrigatorios.length > 0"
+                  :loading="baixando || salvandoCampos"
                   @click="baixar"
                 />
                 <p
-                  v-if="!podeBaixar"
+                  v-if="!podeBaixar || faltamObrigatorios.length"
                   class="mt-2 text-center text-xs text-muted"
                 >
-                  Confirme a leitura acima para liberar o download.
+                  {{
+                    faltamObrigatorios.length
+                      ? "Preencha os campos obrigatórios acima para liberar o download."
+                      : "Confirme a leitura acima para liberar o download."
+                  }}
                 </p>
               </div>
             </template>
@@ -273,8 +428,10 @@ const whatsapp = computed(() => {
               -->
               <p v-if="data.temArquivo">
                 Para comprovar a entrega e a ciência deste comunicado,
-                registramos a data, a hora e o endereço IP do seu acesso, da
-                confirmação de leitura e do download.
+                registramos a data, a hora e o endereço IP do seu acesso,{{
+                  camposResposta.length ? " das informações preenchidas," : ""
+                }}
+                da confirmação de leitura e do download.
               </p>
               <p v-else>
                 Para comprovar a entrega e a ciência deste comunicado,
