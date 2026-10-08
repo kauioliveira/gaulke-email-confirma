@@ -65,7 +65,17 @@ function adicionar(tipo: TipoItemSolic, preset?: 'sim_nao') {
   const n = itens.value.length - 1
   // escolha e declaracao ja abrem: tem o que configurar
   abertos.value = new Set([...abertos.value, n])
-  nextTick(() => document.getElementById(`item-solic-${n}`)?.focus())
+  // no texto informativo a linha de cima e so o titulo (opcional): o cursor vai
+  // direto para o texto, senao a pessoa escreve no titulo e o texto fica vazio
+  const alvo = tipo === 'informativo' ? `item-texto-${n}` : `item-solic-${n}`
+  nextTick(() => document.getElementById(alvo)?.focus())
+}
+
+/** Texto informativo sem texto: o erro diz onde escrever, e o botao abre o lugar. */
+const faltaTextoInformativo = (item: ItemModeloChecklist) => item.tipo === 'informativo' && !item.config.texto?.trim()
+function escreverTexto(i: number) {
+  abertos.value = new Set([...abertos.value, i])
+  nextTick(() => document.getElementById(`item-texto-${i}`)?.focus())
 }
 
 const menuAdicionar: DropdownMenuItem[][] = [
@@ -210,7 +220,11 @@ const numeroOuNada = (v: unknown) => (v === '' || v == null || Number.isNaN(Numb
         <span v-if="item.tipo !== 'informativo'" class="sm:hidden">{{ item.obrigatorio ? 'Obrigatório' : 'Opcional' }} · </span>
         {{ resumo(item) }}
         <template v-if="item.instrucao"> · “{{ item.instrucao }}”</template>
-        <span v-if="erros[i]" class="block text-error">{{ erros[i] }}</span>
+        <span v-if="faltaTextoInformativo(item)" class="block text-error">
+          Falta o texto: a linha acima é só o título (opcional).
+          <button type="button" class="font-medium underline" @click="escreverTexto(i)">Escrever o texto</button>
+        </span>
+        <span v-else-if="erros[i]" class="block text-error">{{ erros[i] }}</span>
       </p>
 
       <div v-else class="grid gap-4 border-t border-default p-3 sm:grid-cols-2">
@@ -467,6 +481,7 @@ const numeroOuNada = (v: unknown) => (v === '' || v == null || Number.isNaN(Numb
             help="Orientações, avisos, contexto. Ele não responde nada aqui. Quebras de linha são mantidas."
           >
             <UTextarea
+              :id="`item-texto-${i}`"
               :model-value="item.config.texto ?? ''"
               :rows="4"
               autoresize

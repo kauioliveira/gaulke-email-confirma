@@ -65,6 +65,9 @@ const camposPagina = ref<ItemModeloChecklist[]>([])
 const erroCampos = computed(() => {
   for (const [i, c] of camposPagina.value.entries()) {
     if (c.tipo !== 'informativo' && !c.titulo.trim()) return `Dê um nome ao campo ${i + 1}.`
+    if (c.tipo === 'informativo' && !c.config.texto?.trim()) {
+      return `Item ${i + 1} (texto informativo): falta o texto. A linha de cima é só o título — clique em “Escrever o texto” no item.`
+    }
     const r = normalizarConfig(c.tipo, c.config)
     if (!r.ok) return `Campo ${i + 1}: ${r.erro}`
   }

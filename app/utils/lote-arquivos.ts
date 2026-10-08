@@ -13,6 +13,8 @@ export type ContatoLinha = {
   suprimido: boolean
   /** digitado na tela (vai para o cadastro ao criar o lote) */
   manual: boolean
+  /** id no cadastro de contatos (sys_mail_empresa_contatos); ausente = ainda não salvo */
+  id?: number
 }
 
 export type LinhaArquivo = {

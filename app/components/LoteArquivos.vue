@@ -2,7 +2,7 @@
 import { TIPOS_ANEXO, acceptDe, familiasDe, iconeDoArquivo } from '~~/shared/types/tipos-arquivo'
 import { documentoValidoDV, formatarDocumento, mascaraDocumento, soDigitosDoc } from '~~/shared/utils/documento'
 import { tamanho } from '~/utils/formato'
-import { SITUACOES, destinatariosDasLinhas, situacaoLinha, type LinhaArquivo, type SituacaoLinha } from '~/utils/lote-arquivos'
+import { SITUACOES, destinatariosDasLinhas, situacaoLinha, type ContatoLinha, type LinhaArquivo, type SituacaoLinha } from '~/utils/lote-arquivos'
 
 /**
  * Passo 1 do lote "arquivos por cliente".
@@ -175,7 +175,7 @@ async function consultar(documentos: string[]) {
       const emails = [...l.emails]
       for (const c of x.emails) {
         if (emails.some(e => e.email === c.email)) continue
-        emails.push({ email: c.email, nome: c.nome, marcado: !c.suprimido, suprimido: c.suprimido, manual: false })
+        emails.push({ id: c.id, email: c.email, nome: c.nome, marcado: !c.suprimido, suprimido: c.suprimido, manual: false })
       }
       return { ...l, empresa: x.fantasia ? `${x.nome} (${x.fantasia})` : (x.nome ?? l.empresa), cadastrado: !!x.nome, emails }
     })
@@ -224,6 +224,29 @@ function adicionarEmail(i: number) {
 }
 function marcarEmail(i: number, email: string, marcado: boolean) {
   atualizar(i, { emails: linhas.value[i]!.emails.map(e => (e.email === email ? { ...e, marcado } : e)) })
+}
+
+/**
+ * Excluir um e-mail (o de um teste, um endereço errado): sai desta linha e,
+ * se já estava salvo, do cadastro do CNPJ — de todas as linhas do mesmo CNPJ.
+ * Uma confirmação só.
+ */
+const excluindo = ref<string | null>(null)
+async function excluirEmail(i: number, e: ContatoLinha) {
+  const l = linhas.value[i]!
+  if (!confirm(`Excluir ${e.email}${e.id ? ` do cadastro de ${formatarDocumento(l.documento)}` : ''}?`)) return
+  excluindo.value = `${l.nome}|${e.email}`
+  try {
+    if (e.id) await $fetch(api(`/api/admin/empresa-contatos/${e.id}`), { method: 'DELETE' })
+    linhas.value = linhas.value.map((x, n) =>
+      n === i || (e.id && x.documento === l.documento) ? { ...x, emails: x.emails.filter(y => y.email !== e.email) } : x
+    )
+    toast.add({ title: `${e.email} excluído`, color: 'success', icon: 'i-lucide-trash-2' })
+  } catch (err: any) {
+    toast.add({ title: 'Não foi possível excluir', description: err?.data?.statusMessage, color: 'error' })
+  } finally {
+    excluindo.value = null
+  }
 }
 
 function remover(i: number) {
@@ -433,15 +456,28 @@ const ORIGEM_DOC: Record<string, string> = { nome: 'pelo nome do arquivo', conte
             <div v-if="l.documento" class="text-sm">
               <p class="mb-1 text-xs font-semibold uppercase text-muted">Quem recebe</p>
               <div v-if="l.emails.length" class="space-y-1">
+                <div v-for="e in l.emails" :key="e.email" class="group flex items-start gap-1">
                 <UCheckbox
-                  v-for="e in l.emails"
-                  :key="e.email"
+                  class="min-w-0 flex-1"
                   :model-value="e.marcado && !e.suprimido"
                   :disabled="e.suprimido"
                   :label="e.email"
                   :description="e.suprimido ? 'Devolve e-mail (lista de supressão)' : e.manual ? 'Informado agora — fica salvo para os próximos envios' : (e.nome ?? undefined)"
                   @update:model-value="v => marcarEmail(i, e.email, v === true)"
                 />
+                <UTooltip :text="e.id ? 'Excluir do cadastro deste CNPJ' : 'Tirar este e-mail'">
+                  <UButton
+                    icon="i-lucide-trash-2"
+                    color="error"
+                    variant="ghost"
+                    size="xs"
+                    class="opacity-50 transition group-hover:opacity-100"
+                    :loading="excluindo === `${l.nome}|${e.email}`"
+                    :aria-label="`Excluir ${e.email}`"
+                    @click="excluirEmail(i, e)"
+                  />
+                </UTooltip>
+                </div>
               </div>
               <p v-else class="text-xs text-warning">Nenhum e-mail cadastrado para este CNPJ.</p>
               <div class="mt-2 flex gap-2">
