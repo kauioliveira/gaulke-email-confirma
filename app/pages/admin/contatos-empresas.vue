@@ -11,6 +11,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin' })
 useHead({ title: 'Contatos das empresas — Gaulke Comunica' })
 
 const toast = useToast()
+const confirmar = useConfirmar()
 
 type Contato = {
   id: number
@@ -51,7 +52,14 @@ const ORIGEM: Record<string, string> = {
 }
 
 async function esquecer(c: Contato) {
-  if (!confirm(`Tirar ${c.email} dos contatos de ${formatarDocumento(c.documento)}?`)) return
+  const ok = await confirmar({
+    titulo: `Excluir ${c.email}?`,
+    descricao: `Sai dos contatos de ${formatarDocumento(c.documento)} e não aparece mais nos próximos envios.`,
+    sim: 'Excluir',
+    cor: 'error',
+    icone: 'i-lucide-trash-2'
+  })
+  if (!ok) return
   try {
     await $fetch(api(`/api/admin/empresa-contatos/${c.id}`), { method: 'DELETE' })
     toast.add({ title: 'Contato removido', color: 'success' })

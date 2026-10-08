@@ -22,6 +22,7 @@ const props = defineProps<{ bloqueado?: string | null }>()
 const emit = defineEmits<{ primeiroArquivo: [nome: string] }>()
 
 const toast = useToast()
+const confirmar = useConfirmar()
 const ACCEPT = `${acceptDe(TIPOS_ANEXO)},.zip`
 const FORMATOS = familiasDe(TIPOS_ANEXO)
 const PACOTE_MAX = 24 * 1024 * 1024
@@ -234,7 +235,16 @@ function marcarEmail(i: number, email: string, marcado: boolean) {
 const excluindo = ref<string | null>(null)
 async function excluirEmail(i: number, e: ContatoLinha) {
   const l = linhas.value[i]!
-  if (!confirm(`Excluir ${e.email}${e.id ? ` do cadastro de ${formatarDocumento(l.documento)}` : ''}?`)) return
+  const ok = await confirmar({
+    titulo: `Excluir ${e.email}?`,
+    descricao: e.id
+      ? `Sai deste envio e do cadastro de ${formatarDocumento(l.documento)} — não aparece mais nos próximos envios.`
+      : 'Sai deste envio.',
+    sim: 'Excluir',
+    cor: 'error',
+    icone: 'i-lucide-trash-2'
+  })
+  if (!ok) return
   excluindo.value = `${l.nome}|${e.email}`
   try {
     if (e.id) await $fetch(api(`/api/admin/empresa-contatos/${e.id}`), { method: 'DELETE' })
@@ -252,8 +262,15 @@ async function excluirEmail(i: number, e: ContatoLinha) {
 function remover(i: number) {
   linhas.value = linhas.value.filter((_, n) => n !== i)
 }
-function limparTudo() {
-  if (!confirm('Tirar todos os arquivos deste envio?')) return
+async function limparTudo() {
+  const ok = await confirmar({
+    titulo: 'Tirar todos os arquivos deste envio?',
+    descricao: `Os ${linhas.value.length} arquivo(s) e as escolhas de e-mail saem da lista. Os e-mails salvos no cadastro continuam.`,
+    sim: 'Tirar todos',
+    cor: 'error',
+    icone: 'i-lucide-trash'
+  })
+  if (!ok) return
   linhas.value = []
   recusados.value = []
   leituras.value = []
