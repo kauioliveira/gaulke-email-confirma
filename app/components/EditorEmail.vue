@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Bloco, FormatoTemplate } from '~~/shared/types/blocos'
+import { chaveVariavel } from '~~/shared/utils/variaveis'
 
 /**
  * Editor do e-mail, em três modos.
@@ -14,6 +15,11 @@ const props = defineProps<{
   arquivos?: { nome: string; caminho: string; origem?: 'sistema' | 'enviada' }[]
   /** Repassado ao editor de blocos: com anexo, o botão de acesso é obrigatório. */
   exigeBotao?: boolean
+  /**
+   * Colunas extras da planilha do lote (nome da coluna -> valor de exemplo).
+   * Viram variáveis clicáveis no editor e o preview mostra o valor real.
+   */
+  extras?: Record<string, string>
 }>()
 
 /** Sobe do editor de blocos até a tela, que é quem recarrega a lista. */
@@ -46,10 +52,19 @@ const VARIAVEIS_HTML: { chave: string; rotulo?: string; desc: string }[] = [
 
 /** O corpo enviado ao preview muda conforme o modo, mas o endpoint é o mesmo. */
 function corpoPreview() {
+  const exemplo = props.extras && Object.keys(props.extras).length ? { exemplo: { extras: props.extras } } : {}
   return formato.value === 'blocos'
-    ? { blocos: blocos.value, assunto: props.assunto }
-    : { html: html.value, assunto: props.assunto }
+    ? { blocos: blocos.value, assunto: props.assunto, ...exemplo }
+    : { html: html.value, assunto: props.assunto, ...exemplo }
 }
+
+const variaveisExtras = computed(() =>
+  Object.entries(props.extras || {}).map(([coluna, valor]) => ({
+    chave: `{{${chaveVariavel(coluna)}}}`,
+    rotulo: coluna,
+    desc: `Coluna "${coluna}" da planilha — ex.: "${valor}"`
+  }))
+)
 
 async function atualizarPreview() {
   carregando.value = true
@@ -161,6 +176,7 @@ async function converterParaHtml() {
         v-model="blocos"
         :arquivos="arquivos"
         :exige-botao="exigeBotao"
+        :extras="variaveisExtras"
         @imagem-enviada="$emit('imagemEnviada')"
       />
 
@@ -226,7 +242,7 @@ async function converterParaHtml() {
             Variáveis disponíveis — clique para inserir no fim do HTML
           </p>
           <div class="flex flex-wrap gap-2">
-            <UTooltip v-for="v in VARIAVEIS_HTML" :key="v.chave" :text="v.desc">
+            <UTooltip v-for="v in [...VARIAVEIS_HTML, ...variaveisExtras]" :key="v.chave" :text="v.desc">
               <UButton
                 size="xs"
                 color="neutral"

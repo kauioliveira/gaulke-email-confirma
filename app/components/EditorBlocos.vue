@@ -22,6 +22,8 @@ const props = defineProps<{
    * comunicado, e o botão é opcional.
    */
   exigeBotao?: boolean
+  /** Colunas extras da planilha do lote, já com a chave pronta ({{aliquota_do_simples}}). */
+  extras?: { chave: string; rotulo: string; desc: string }[]
 }>()
 
 /** Avisa o pai que uma imagem nova foi enviada e a lista precisa recarregar. */
@@ -303,6 +305,18 @@ function atualizarItem(b: Bloco, i: number, valor: string) {
             color="neutral"
             variant="outline"
             :icon="v.icone"
+            :label="v.rotulo"
+            @mousedown.prevent
+            @click="inserirVariavel(v.chave)"
+          />
+        </UTooltip>
+        <!-- colunas extras da planilha do lote -->
+        <UTooltip v-for="v in extras || []" :key="v.chave" :text="v.desc">
+          <UButton
+            size="xs"
+            color="primary"
+            variant="outline"
+            icon="i-lucide-table"
             :label="v.rotulo"
             @mousedown.prevent
             @click="inserirVariavel(v.chave)"

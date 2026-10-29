@@ -1,4 +1,5 @@
 import { baseUrl, linkAcesso, linkPixel, linkLogo } from './urls'
+import { chaveVariavel } from '../../shared/utils/variaveis'
 
 export type VarsDestinatario = {
   nome?: string | null
@@ -17,8 +18,10 @@ function escapeHtml(v: unknown) {
     .replace(/"/g, '&quot;')
 }
 
-const RE_VARIAVEL = /\{\{\s*([\w.-]+)\s*\}\}/g
-const RE_SECAO = /\{\{\s*#([\w.-]+)\s*\}\}([\s\S]*?)\{\{\s*\/\1\s*\}\}/g
+// aceita acento e espaco: colunas extras chegam com o nome da planilha
+// ("Alíquota do Simples"), e a chave e normalizada por chaveVariavel
+const RE_VARIAVEL = /\{\{\s*([^{}#/]+?)\s*\}\}/g
+const RE_SECAO = /\{\{\s*#([^{}#/]+?)\s*\}\}([\s\S]*?)\{\{\s*\/\1\s*\}\}/g
 
 /**
  * Trecho condicional: `{{#empresa}}, da {{empresa}}{{/empresa}}` so aparece
@@ -33,7 +36,7 @@ const RE_SECAO = /\{\{\s*#([\w.-]+)\s*\}\}([\s\S]*?)\{\{\s*\/\1\s*\}\}/g
  */
 function aplicarSecoes(texto: string, preenchida: (chave: string) => boolean) {
   return texto.replace(RE_SECAO, (_m, chave: string, corpo: string) =>
-    preenchida(chave.toLowerCase()) ? corpo : ''
+    preenchida(chaveVariavel(chave)) ? corpo : ''
   )
 }
 
@@ -56,14 +59,15 @@ export function renderizar(html: string, r: VarsDestinatario, base?: string) {
     empresa: escapeHtml(r.empresa || ''),
     codigo: escapeHtml(r.codigo)
   }
-  for (const [k, v] of Object.entries(r.dadosExtras || {})) {
-    if (!(k in seguras) && !(k in escapadas)) escapadas[k] = escapeHtml(v)
+  for (const [coluna, v] of Object.entries(r.dadosExtras || {})) {
+    const k = chaveVariavel(coluna)
+    if (k && !(k in seguras) && !(k in escapadas)) escapadas[k] = escapeHtml(v)
   }
 
   const comSecoes = aplicarSecoes(html, k => !!(seguras[k] || escapadas[k]))
 
   let out = comSecoes.replace(RE_VARIAVEL, (m, chave: string) => {
-    const k = chave.toLowerCase()
+    const k = chaveVariavel(chave)
     if (k in seguras) return seguras[k]!
     if (k in escapadas) return escapadas[k]!
     return m
@@ -84,8 +88,12 @@ export function renderizarAssunto(assunto: string, r: VarsDestinatario) {
     codigo: r.codigo,
     email: r.email
   }
+  for (const [coluna, v] of Object.entries(r.dadosExtras || {})) {
+    const k = chaveVariavel(coluna)
+    if (k && !(k in valores)) valores[k] = String(v ?? '')
+  }
   return aplicarSecoes(assunto, k => !!valores[k]).replace(RE_VARIAVEL, (m, chave: string) => {
-    const k = chave.toLowerCase()
+    const k = chaveVariavel(chave)
     return k in valores ? valores[k]! : m
   })
 }

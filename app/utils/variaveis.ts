@@ -1,4 +1,5 @@
 import type { Bloco } from '~~/shared/types/blocos'
+import { chaveVariavel } from '~~/shared/utils/variaveis'
 
 /**
  * Variáveis que o sistema preenche sozinho no envio (server/utils/render.ts).
@@ -10,7 +11,7 @@ import type { Bloco } from '~~/shared/types/blocos'
  */
 export const VARIAVEIS_CONHECIDAS = ['nome', 'email', 'empresa', 'codigo', 'link', 'pixel', 'logo', 'base']
 
-const RE_VARIAVEL = /\{\{\s*[#/]?\s*([\w.-]+)\s*\}\}/g
+const RE_VARIAVEL = /\{\{\s*[#/]?\s*([^{}#/]+?)\s*\}\}/g
 
 /** Todos os textos que a pessoa escreveu nos blocos. */
 function textosDosBlocos(blocos: Bloco[]): string[] {
@@ -30,7 +31,7 @@ export function variaveisDesconhecidas(assunto: string, blocos: Bloco[] | null, 
   const achadas = new Set<string>()
   for (const t of textos) {
     for (const m of t.matchAll(RE_VARIAVEL)) {
-      const chave = m[1]!.toLowerCase()
+      const chave = chaveVariavel(m[1]!)
       if (!VARIAVEIS_CONHECIDAS.includes(chave)) achadas.add(chave)
     }
   }

@@ -83,6 +83,18 @@ type Item = ItemDestinatario
 const carrinho = ref<Record<string, Item>>({})
 
 /**
+ * Colunas extras da planilha, com o primeiro valor preenchido de cada uma:
+ * o editor mostra as colunas como variáveis e o preview usa esse valor.
+ */
+const exemploExtras = computed(() => {
+  const out: Record<string, string> = {}
+  for (const i of Object.values(carrinho.value)) {
+    for (const [coluna, valor] of Object.entries(i.extras || {})) if (valor && !(coluna in out)) out[coluna] = valor
+  }
+  return out
+})
+
+/**
  * Padronizacao dos nomes escolhida por quem dispara. E aplicada na SAIDA, nao
  * na entrada: o carrinho guarda o texto original, entao trocar de formato
  * refaz a lista inteira sem perder informacao.
@@ -883,6 +895,7 @@ async function criarLote() {
           :assunto="assunto"
           :arquivos="arquivosBrand"
           :exige-botao="!!arquivoNome || porArquivos"
+          :extras="exemploExtras"
           @imagem-enviada="recarregarImagens"
         />
       </div>

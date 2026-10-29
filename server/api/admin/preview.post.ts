@@ -16,7 +16,9 @@ const schema = z.object({
     .object({
       nome: z.string().optional(),
       email: z.string().optional(),
-      empresa: z.string().optional()
+      empresa: z.string().optional(),
+      // colunas extras da planilha do lote, com o valor de um destinatario
+      extras: z.record(z.string()).optional()
     })
     .optional()
 })
@@ -32,7 +34,7 @@ export default defineEventHandler(async event => {
     empresa: exemplo?.empresa || 'Empresa Exemplo LTDA',
     codigo: novoCodigo(),
     token: novoToken(),
-    dadosExtras: null
+    dadosExtras: exemplo?.extras || null
   }
   /**
    * O preview usa o endereco de onde a tela foi aberta, e nao URL_ACESSO:
