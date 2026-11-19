@@ -2,9 +2,7 @@ node_modules
 .nuxt
 .output
 .data
-dist
-.env
-.env.production
+
 .DS_Store
 storage/files/*
 !storage/files/.gitkeep
